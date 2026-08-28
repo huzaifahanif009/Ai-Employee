@@ -6,7 +6,8 @@
   "workspaces": [
     "packages/*",
     "services/core",
-    "services/orchestrator"
+    "services/orchestrator",
+    "services/dashboard"
   ],
   "engines": {
     "node": ">=20.11.0"

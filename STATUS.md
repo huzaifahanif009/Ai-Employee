@@ -45,10 +45,16 @@ services/orchestrator/     Temporal RunWorkflow (deterministic step sequence, HI
                           Not started by default (RUN_DRIVER=inproc). Wire in Phase 2.
 services/agent/            FastAPI skeleton: /healthz + /v1/{triage,repo-map,plan,execute-step,
   (skeleton, Python)       review} with heuristic stubs + pytest. Real LangGraph roles = Phase 3.
-services/dashboard/        Static demo console (vanilla JS): login, work items, runs table,
-                          live SSE activity feed, pause/resume/cancel/comment, **Approvals panel**
-                          (polls + SSE-triggered refresh, Approve/Reject with note). Angular 21
-                          app = Phase 3.
+services/dashboard/        **Next.js 16 + React 19 + Tailwind v4 + Radix (shadcn-style)** app.
+  (@praxis/dashboard)      TanStack Query for data, native EventSource for SSE, dark-first theme
+                          (light/dark/system toggle). Imports the real `@praxis/event-schemas`
+                          catalog (single source of truth for event types / run states).
+                          Screens: Login (+ register), Overview (fleet stat tiles, active agents,
+                          open approvals, recent runs), Runs list, Run detail (live Activity feed
+                          folded from the event stream + Plan / Verification / Review / Delivery
+                          tabs derived from events, pause/resume/cancel/comment, inline approval
+                          card), Approvals inbox, Work Items (list + create dialog + start run).
+                          Sidebar shows the fuller prd/12 IA as a greyed "Roadmap" section.
 docker-compose.yml         postgres · postgres-temporal · redis · temporal(+ui) · minio(+setup) ·
                           litellm · otel-collector · core · migrate · agent · orchestrator(profile) ·
                           dashboard · gitea(profile: demo)
@@ -58,18 +64,24 @@ docs/adr/                  0001–0011
 
 ## Run it
 
+Full stack in Docker (recommended):
+
 ```bash
 cp .env.example .env
-docker compose up -d postgres redis
-npm install
-npm run build:contracts
-npm run -w @praxis/core migration:run
-npm run -w @praxis/core seed
-npm run -w @praxis/core start:dev        # :3000/api/v1  (OpenAPI at /api/v1/docs)
-# then, full stack:  docker compose up -d --build   (dashboard on :8080)
+docker compose up -d --build          # core :3000 · dashboard :8080 · temporal-ui :8088
+docker compose run --rm migrate       # migrations + demo seed (first run only)
+open http://localhost:8080            # login: admin@praxis.local / ChangeMe123!
 ```
 
-Login: `admin@praxis.local` / `ChangeMe123!`.
+App services only, against Dockerised infra (faster inner loop):
+
+```bash
+docker compose up -d postgres redis
+npm install && npm run build:contracts
+npm run -w @praxis/core migration:run && npm run -w @praxis/core seed
+npm run -w @praxis/core start:dev      # :3000/api/v1  (OpenAPI at /api/v1/docs)
+npm run -w @praxis/dashboard dev       # :3000 by default — set PORT=3001; browser talks to core directly
+```
 
 ## Known gaps / next (Phase 2 — [`prd/phases/phase-2-foundation.md`](./prd/phases/phase-2-foundation.md))
 
@@ -79,6 +91,7 @@ Login: `admin@praxis.local` / `ChangeMe123!`.
 - **Model Router** — interface defined; LiteLLM container runs with a stub model; the router service (budgets/attribution/redaction/ledger) = Phase 2 P1-PROV-1.
 - **Risky-tool + review-block + non-progress approval gates** — plan and delivery gates are wired; the other three gate types from prd/06 §5 use the same `ApprovalGateService` but aren't triggered by anything yet (no real tool execution or reviewer exists to trigger them).
 - **Connectors** (GitHub / EDAP Workdesk / Slack) — contracts defined; implementations = Phase 2. (Slack would also replace the dashboard-only approval decision path with ChatOps per `prd/09` §3.)
-- **Dashboard** — static console only; the Angular 21 app per `prd/12` = Phase 3.
+- **Dashboard** — real Next.js app now covers the core loop (login → work items → runs → live run detail → approvals). Not yet built from prd/12: Projects / Agents & Policies / Analytics / Integrations / System Health / Audit Log screens (shown as a "Roadmap" section in the sidebar); WebSocket for control actions (uses REST); virtualized lists; a11y audit.
+- **Dashboard framework decision** — Next.js (per user direction — separate from the EDAP Workdesk Angular app), not Angular. `prd/04` §15 / `prd/12` §1 name Angular as the default with Next.js an accepted alternative; the alternative was chosen. ADR update pending.
 - **Toolchain** — pinned below PRD targets (Node 20 / Python 3.10 / npm), see ADR-0011.
 - **Local ports** — Postgres on host **5433** (native PG holds 5432 on this machine).

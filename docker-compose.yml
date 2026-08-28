@@ -195,11 +195,18 @@ services:
 
   dashboard:
     build:
-      context: services/dashboard
+      context: .
+      dockerfile: services/dashboard/Dockerfile
+      args:
+        # baked into the client bundle — the browser reaches core directly (CORS is open)
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3000/api/v1}
     depends_on: [core]
-    environment:
-      PRAXIS_API_URL: http://localhost:3000/api/v1
-    ports: ["8080:80"]
+    ports: ["8080:3000"]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/login').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 3s
+      retries: 10
 
   gitea:
     image: gitea/gitea:1.22

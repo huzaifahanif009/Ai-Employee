@@ -39,3 +39,6 @@ packages/*/src/**/*.js.map
 
 # claude code local state
 .claude/
+
+# nested lockfile — root package-lock.json governs the workspace
+services/dashboard/package-lock.json
