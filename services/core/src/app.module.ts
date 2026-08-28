@@ -10,6 +10,7 @@ import { ApprovalsModule } from './approvals/approvals.module';
 import { ProblemDetailsFilter } from './common/problem-details.filter';
 import { EventsModule } from './events/events.module';
 import { HealthController } from './health/health.controller';
+import { ModelModule } from './model/model.module';
 import { ProjectsModule } from './projects/projects.module';
 import { RunsModule } from './runs/runs.module';
 import { WorkItemsModule } from './work-items/work-items.module';
@@ -34,6 +35,7 @@ import { WorkItemsModule } from './work-items/work-items.module';
     ProjectsModule,
     WorkItemsModule,
     ApprovalsModule,
+    ModelModule,
     RunsModule,
   ],
   controllers: [HealthController],

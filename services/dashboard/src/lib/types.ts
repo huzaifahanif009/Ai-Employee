@@ -121,6 +121,39 @@ export type ApprovalDecision =
   | "grant_budget"
   | "deliver_anyway";
 
+export interface ModelCall {
+  id: string;
+  runId: string | null;
+  runStepId: string | null;
+  agentRole: string | null;
+  purpose: string;
+  provider: string;
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  cachedInputTokens: number;
+  costUsd: string;
+  latencyMs: number;
+  cacheHit: "none" | "exact" | "semantic";
+  finishReason: string | null;
+  redactedSpans: number;
+  createdAt: string;
+}
+
+export interface ModelCatalogEntry {
+  alias: string;
+  provider: string;
+  model: string;
+  contextWindow: number;
+  maxOutput: number;
+  capabilities: string[];
+  priceInputPerMTok: number;
+  priceOutputPerMTok: number;
+  latencyClass: string;
+  dataRegion: string;
+  enabled: boolean;
+}
+
 export interface ProblemDetails {
   type: string;
   title: string;

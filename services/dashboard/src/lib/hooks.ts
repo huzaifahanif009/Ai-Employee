@@ -5,6 +5,8 @@ import { api } from "./api";
 import type {
   Approval,
   ApprovalDecision,
+  ModelCall,
+  ModelCatalogEntry,
   Page,
   Project,
   Run,
@@ -45,6 +47,23 @@ export function useRun(id: string | null) {
     queryFn: () => api.get<Run>(`/runs/${id}`),
     enabled: !!id,
     refetchInterval: 4000,
+  });
+}
+
+export function useRunModelCalls(runId: string | null, live: boolean) {
+  return useQuery({
+    queryKey: ["runs", runId ?? "", "model-calls"],
+    queryFn: () => api.get<ModelCall[]>(`/runs/${runId}/model-calls`),
+    enabled: !!runId,
+    refetchInterval: live ? 3000 : false,
+  });
+}
+
+export function useModelCatalog() {
+  return useQuery({
+    queryKey: ["model-catalog"],
+    queryFn: () => api.get<ModelCatalogEntry[]>("/model/catalog"),
+    staleTime: 60_000,
   });
 }
 

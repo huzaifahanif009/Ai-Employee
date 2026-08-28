@@ -13,7 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { authErrorMessage } from "@/lib/auth";
 import { deriveDelivery, derivePlan, deriveReview, deriveSteps, deriveVerification } from "@/lib/derive";
-import { useApprovals, useRun, useRunControl } from "@/lib/hooks";
+import { useApprovals, useRun, useRunControl, useRunModelCalls } from "@/lib/hooks";
 import { useRunStream } from "@/lib/sse";
 import { formatTokens, formatUsd, shortId } from "@/lib/utils";
 
@@ -26,6 +26,9 @@ export default function RunDetailPage() {
   const { data: openApprovals } = useApprovals("open");
   const control = useRunControl(id);
   const [comment, setComment] = useState("");
+
+  const terminalNow = !!run && TERMINAL.has(run.state);
+  const { data: modelCalls } = useRunModelCalls(id, !terminalNow);
 
   const runApprovals = (openApprovals ?? []).filter((a) => a.runId === id);
   const plan = derivePlan(events);
@@ -137,6 +140,7 @@ export default function RunDetailPage() {
               <TabsTrigger value="verify">Verification</TabsTrigger>
               <TabsTrigger value="review">Review</TabsTrigger>
               <TabsTrigger value="delivery">Delivery</TabsTrigger>
+              <TabsTrigger value="cost">Cost{modelCalls?.length ? ` (${modelCalls.length})` : ""}</TabsTrigger>
             </TabsList>
 
             <TabsContent value="activity">
@@ -266,6 +270,75 @@ export default function RunDetailPage() {
                       </li>
                     ))}
                   </ul>
+                </div>
+              )}
+            </TabsContent>
+
+            <TabsContent value="cost">
+              {(modelCalls?.length ?? 0) === 0 && (
+                <p className="text-sm text-muted">No model calls recorded yet.</p>
+              )}
+              {modelCalls && modelCalls.length > 0 && (
+                <div className="space-y-4">
+                  <div className="flex gap-6 text-sm">
+                    <span>
+                      <span className="text-muted">Total </span>
+                      {formatUsd(modelCalls.reduce((s, c) => s + parseFloat(c.costUsd), 0))}
+                    </span>
+                    <span>
+                      <span className="text-muted">Tokens </span>
+                      {formatTokens(
+                        modelCalls.reduce((s, c) => s + c.inputTokens + c.outputTokens, 0),
+                      )}
+                    </span>
+                    <span>
+                      <span className="text-muted">Calls </span>
+                      {modelCalls.length}
+                    </span>
+                    {modelCalls.some((c) => c.redactedSpans > 0) && (
+                      <span className="text-warn">
+                        {modelCalls.reduce((s, c) => s + c.redactedSpans, 0)} redactions
+                      </span>
+                    )}
+                  </div>
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="text-left text-xs text-muted">
+                        <th className="pb-2 font-medium">Purpose</th>
+                        <th className="pb-2 font-medium">Role</th>
+                        <th className="pb-2 font-medium">Model</th>
+                        <th className="pb-2 font-medium">In</th>
+                        <th className="pb-2 font-medium">Out</th>
+                        <th className="pb-2 font-medium">Cost</th>
+                        <th className="pb-2 font-medium">Latency</th>
+                        <th className="pb-2 font-medium">Cache</th>
+                      </tr>
+                    </thead>
+                    <tbody className="font-mono text-xs">
+                      {modelCalls.map((c) => (
+                        <tr key={c.id} className="border-t border-line">
+                          <td className="py-1.5">{c.purpose}</td>
+                          <td className="py-1.5 text-muted">{c.agentRole ?? "—"}</td>
+                          <td className="py-1.5">
+                            {c.provider}/{c.model}
+                          </td>
+                          <td className="py-1.5 tabular-nums">{c.inputTokens}</td>
+                          <td className="py-1.5 tabular-nums">{c.outputTokens}</td>
+                          <td className="py-1.5 tabular-nums">
+                            {formatUsd(parseFloat(c.costUsd))}
+                          </td>
+                          <td className="py-1.5 tabular-nums">{c.latencyMs}ms</td>
+                          <td className="py-1.5">
+                            {c.cacheHit === "none" ? (
+                              <span className="text-muted">—</span>
+                            ) : (
+                              <span className="text-ok">{c.cacheHit}</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               )}
             </TabsContent>

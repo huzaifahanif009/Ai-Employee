@@ -6,6 +6,7 @@ import { ApprovalGateService } from '../approvals/approval-gate.service';
 import { AppConfig, CONFIG } from '../config/config';
 import { RunEntity } from '../database/entities';
 import { RunEventsService } from '../events/run-events.service';
+import { ModelRouterService } from '../model/model-router.service';
 import { assertTransition } from './run-state-machine';
 
 interface Control {
@@ -31,6 +32,7 @@ export class InprocRunDriver {
     @InjectRepository(RunEntity) private readonly runs: Repository<RunEntity>,
     private readonly events: RunEventsService,
     private readonly approvalGate: ApprovalGateService,
+    private readonly modelRouter: ModelRouterService,
   ) {}
 
   pause(runId: string) {
@@ -50,6 +52,7 @@ export class InprocRunDriver {
     const control: Control = { paused: false, cancelled: false };
     this.controls.set(runId, control);
     const t0 = Date.now();
+    const projectId = (await this.runs.findOneByOrFail({ id: runId })).projectId;
 
     const step = async (to: RunState) => {
       await this.gate(control, runId);
@@ -83,10 +86,44 @@ export class InprocRunDriver {
       await emit('run.totals_updated', { runId, ...run.totals });
     };
 
+    /**
+     * Real metered call through the Model Router (→ LiteLLM). With no provider keys this
+     * routes to the always-on `praxis-stub` model (cost $0), but the call, the ledger row,
+     * the `model_call.*` events and the token accounting are all genuine.
+     */
+    const askModel = async (
+      purpose: 'triage' | 'plan' | 'code' | 'review',
+      prompt: string,
+      routingClass: 'fast' | 'strong' | 'code',
+      stepId?: string,
+    ) => {
+      try {
+        const res = await this.modelRouter.complete({
+          purpose,
+          routingClass,
+          messages: [
+            { role: 'system', content: [{ type: 'text', text: 'You are a Praxis agent (demo driver).' }] },
+            { role: 'user', content: [{ type: 'text', text: prompt }] },
+          ],
+          maxOutputTokens: 256,
+          attribution: { tenantId, projectId, runId, stepId, agentRole: purpose === 'review' ? 'reviewer' : purpose === 'plan' ? 'planner' : 'coder' },
+        });
+        await bump({ tokens: res.usage.inputTokens + res.usage.outputTokens, costUsd: res.usage.costUsd });
+        return res;
+      } catch (err) {
+        this.log.warn(`model call (${purpose}) failed: ${(err as Error).message}`);
+        await emit('progress.warning', { runId, stepId, kind: 'model_call_failed', evidence: (err as Error).message });
+        return null;
+      }
+    };
+
     try {
-      // --- plan ---
+      // --- triage + plan ---
       await step('planning');
-      await this.sleep(600, control, runId);
+      await askModel('triage', 'Classify this work item and assess readiness.', 'fast');
+      await this.sleep(300, control, runId);
+      await askModel('plan', 'Produce an ordered implementation plan for the work item.', 'strong');
+      await this.sleep(300, control, runId);
       const steps = [
         { index: 1, title: 'Inspect existing notification code', files: ['src/notifications/service.ts'] },
         { index: 2, title: 'Add retry policy with backoff', files: ['src/notifications/service.ts'] },
@@ -104,7 +141,6 @@ export class InprocRunDriver {
         await emit('plan.step_defined', { planId: `plan-${runId}`, index: s.index, title: s.title, riskTier: 'notify' });
         await this.sleep(120, control, runId);
       }
-      await bump({ tokens: 4200, costUsd: 0.012 });
 
       // --- plan approval gate (real HITL — prd/06 §5, FR-PLAN-4) ---
       if (this.cfg.requirePlanApproval) {
@@ -132,9 +168,10 @@ export class InprocRunDriver {
         if (control.cancelled) return this.finishCancelled(runId, tenantId);
         const stepId = `${runId}-s${s.index}`;
         await emit('run_step.started', { runId, stepId, index: s.index, role: 'coder', title: s.title });
-        await this.sleep(400, control, runId);
+        await this.sleep(200, control, runId);
         await emit('message.delta', { runId, stepId, role: 'coder', deltaText: `Working on: ${s.title}. ` });
-        await this.sleep(300, control, runId);
+        await askModel('code', `Implement step ${s.index}: ${s.title}`, 'code', stepId);
+        await this.sleep(200, control, runId);
         const tcId = `${stepId}-tc1`;
         await emit('tool_call.started', {
           runId, stepId, toolCallId: tcId, tool: s.index === 3 ? 'test.run' : 'fs.patch',
@@ -147,7 +184,7 @@ export class InprocRunDriver {
           outputPreview: s.index === 3 ? '3 passing' : `+18 -4 ${s.files[0]}`,
         });
         await emit('run_step.finished', { runId, stepId, state: 'succeeded', iterations: s.index === 2 ? 2 : 1 });
-        await bump({ tokens: 9000, costUsd: 0.03, toolCalls: 1, filesChanged: 1 });
+        await bump({ toolCalls: 1, filesChanged: 1 });
       }
 
       // --- verify ---
@@ -162,17 +199,16 @@ export class InprocRunDriver {
         });
       }
       await emit('verify.finished', { runId, overall: 'pass', coverageDelta: 0.4 });
-      await bump({ tokens: 1500, costUsd: 0.005 });
 
       // --- review ---
       await step('reviewing');
       await emit('review.started', { runId });
-      await this.sleep(500, control, runId);
+      await askModel('review', 'Review the final diff against the acceptance criteria.', 'strong');
+      await this.sleep(300, control, runId);
       await emit('review.finished', {
         runId, verdict: 'pass',
         findings: [{ severity: 'info', message: 'Retry count is configurable — good.' }],
       });
-      await bump({ tokens: 6000, costUsd: 0.02 });
 
       // --- delivery approval gate (real HITL — prd/06 §5, FR-DELIVER-3) ---
       if (this.cfg.requireDeliveryApproval) {
