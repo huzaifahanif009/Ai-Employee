@@ -36,3 +36,6 @@ services/*/src/**/generated/
 packages/*/src/**/*.js
 packages/*/src/**/*.d.ts
 packages/*/src/**/*.js.map
+
+# claude code local state
+.claude/

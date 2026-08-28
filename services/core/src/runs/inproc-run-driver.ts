@@ -1,7 +1,9 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { RunState } from '@praxis/event-schemas';
+import { RunFailureCategory, RunState } from '@praxis/event-schemas';
 import { Repository } from 'typeorm';
+import { ApprovalGateService } from '../approvals/approval-gate.service';
+import { AppConfig, CONFIG } from '../config/config';
 import { RunEntity } from '../database/entities';
 import { RunEventsService } from '../events/run-events.service';
 import { assertTransition } from './run-state-machine';
@@ -14,7 +16,10 @@ interface Control {
 /**
  * DEMO ONLY (RUN_DRIVER=inproc). Advances a Run through the real state machine emitting
  * a realistic event stream so the dashboard has something live to render in Phase 1 / M1.
- * In Phase 2 the Temporal `orchestrator` service replaces this entirely (ADR-0002).
+ * Human-in-the-loop gates (prd/06 §5) are real: it raises an Approval through
+ * `ApprovalGateService` and blocks on it exactly as a Temporal-driven Run would signal.
+ * In Phase 2 the Temporal `orchestrator` service replaces the *advancement* (not the gate) —
+ * see ADR-0002.
  */
 @Injectable()
 export class InprocRunDriver {
@@ -22,8 +27,10 @@ export class InprocRunDriver {
   private controls = new Map<string, Control>();
 
   constructor(
+    @Inject(CONFIG) private readonly cfg: AppConfig,
     @InjectRepository(RunEntity) private readonly runs: Repository<RunEntity>,
     private readonly events: RunEventsService,
+    private readonly approvalGate: ApprovalGateService,
   ) {}
 
   pause(runId: string) {
@@ -99,6 +106,26 @@ export class InprocRunDriver {
       }
       await bump({ tokens: 4200, costUsd: 0.012 });
 
+      // --- plan approval gate (real HITL — prd/06 §5, FR-PLAN-4) ---
+      if (this.cfg.requirePlanApproval) {
+        await step('awaiting_plan_approval');
+        const decision = await this.approvalGate.raiseAndWait({
+          tenantId,
+          runId,
+          type: 'plan',
+          evidence: {
+            summary: `${steps.length}-step plan touching ${[...new Set(steps.flatMap((s) => s.files))].join(', ')}`,
+            steps: steps.map((s) => ({ index: s.index, title: s.title })),
+            risk: 'medium',
+          },
+          actionPreview: { action: 'execute_plan', stepCount: steps.length },
+        });
+        if (control.cancelled) return this.finishCancelled(runId, tenantId);
+        if (decision.decision === 'reject') {
+          return this.failRun(runId, tenantId, 'plan_rejected', decision.note ?? 'Plan rejected by reviewer');
+        }
+      }
+
       // --- execute ---
       await step('executing');
       for (const s of steps) {
@@ -147,6 +174,22 @@ export class InprocRunDriver {
       });
       await bump({ tokens: 6000, costUsd: 0.02 });
 
+      // --- delivery approval gate (real HITL — prd/06 §5, FR-DELIVER-3) ---
+      if (this.cfg.requireDeliveryApproval) {
+        await step('awaiting_delivery_approval');
+        const decision = await this.approvalGate.raiseAndWait({
+          tenantId,
+          runId,
+          type: 'delivery',
+          evidence: { summary: 'Verification passed, review verdict: pass.' },
+          actionPreview: { action: 'open_pr', repo: 'demo/app', base: 'main' },
+        });
+        if (control.cancelled) return this.finishCancelled(runId, tenantId);
+        if (decision.decision === 'reject') {
+          return this.failRun(runId, tenantId, 'policy_block', decision.note ?? 'Delivery rejected by reviewer');
+        }
+      }
+
       // --- deliver ---
       await step('delivering');
       const branch = `praxis/demo-${runId.slice(0, 8)}`;
@@ -184,6 +227,30 @@ export class InprocRunDriver {
       }
     } finally {
       this.controls.delete(runId);
+    }
+  }
+
+  private async failRun(
+    runId: string,
+    tenantId: string,
+    category: RunFailureCategory,
+    message: string,
+  ) {
+    const run = await this.runs.findOneBy({ id: runId });
+    if (run && !['succeeded', 'failed', 'cancelled', 'timed_out'].includes(run.state)) {
+      run.state = 'failed';
+      run.failureCategory = category;
+      run.failureMessage = message;
+      run.endedAt = new Date();
+      await this.runs.save(run);
+      await this.events.append({
+        tenantId, runId, type: 'run.state_changed',
+        payload: { runId, to: 'failed' },
+      });
+      await this.events.append({
+        tenantId, runId, type: 'run.failed',
+        payload: { runId, category, message },
+      });
     }
   }
 

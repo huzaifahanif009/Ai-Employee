@@ -6,6 +6,7 @@ import { ConfigModule } from './config/config.module';
 import { ALL_ENTITIES } from './database/entities';
 import { AuthModule } from './auth/auth.module';
 import { AuthGuard } from './auth/auth.guard';
+import { ApprovalsModule } from './approvals/approvals.module';
 import { ProblemDetailsFilter } from './common/problem-details.filter';
 import { EventsModule } from './events/events.module';
 import { HealthController } from './health/health.controller';
@@ -32,6 +33,7 @@ import { WorkItemsModule } from './work-items/work-items.module';
     EventsModule,
     ProjectsModule,
     WorkItemsModule,
+    ApprovalsModule,
     RunsModule,
   ],
   controllers: [HealthController],

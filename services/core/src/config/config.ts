@@ -23,6 +23,8 @@ export interface AppConfig {
   temporalNamespace: string;
   temporalTaskQueue: string;
   runDriver: 'temporal' | 'inproc';
+  requirePlanApproval: boolean;
+  requireDeliveryApproval: boolean;
 
   agentRuntimeUrl: string;
   litellmBaseUrl: string;
@@ -56,6 +58,8 @@ const schema = Joi.object({
   TEMPORAL_NAMESPACE: Joi.string().default('default'),
   TEMPORAL_TASK_QUEUE: Joi.string().default('praxis-runs'),
   RUN_DRIVER: Joi.string().valid('temporal', 'inproc').default('inproc'),
+  REQUIRE_PLAN_APPROVAL: Joi.boolean().truthy('true').falsy('false').default(true),
+  REQUIRE_DELIVERY_APPROVAL: Joi.boolean().truthy('true').falsy('false').default(false),
 
   AGENT_RUNTIME_URL: Joi.string().uri().default('http://localhost:8081'),
   LITELLM_BASE_URL: Joi.string().uri().default('http://localhost:4000'),
@@ -93,6 +97,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     temporalNamespace: value.TEMPORAL_NAMESPACE,
     temporalTaskQueue: value.TEMPORAL_TASK_QUEUE,
     runDriver: value.RUN_DRIVER,
+    requirePlanApproval: value.REQUIRE_PLAN_APPROVAL,
+    requireDeliveryApproval: value.REQUIRE_DELIVERY_APPROVAL,
     agentRuntimeUrl: value.AGENT_RUNTIME_URL,
     litellmBaseUrl: value.LITELLM_BASE_URL,
     litellmMasterKey: value.LITELLM_MASTER_KEY,

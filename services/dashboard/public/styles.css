@@ -49,3 +49,16 @@ code { background: var(--bg); padding: 1px 4px; border-radius: 4px; }
 .ev.tool .k { color: var(--ok); }
 .ev.err .k { color: var(--err); }
 .pill { display: inline-block; padding: 1px 7px; border-radius: 10px; font-size: 11px; border: 1px solid var(--line); }
+.approval {
+  border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin-bottom: 10px;
+  background: var(--bg);
+}
+.approval .head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.approval .type { font-weight: 600; }
+.approval .sla { font-size: 12px; color: var(--warn); }
+.approval .sla.urgent { color: var(--err); }
+.approval .summary { font-size: 13px; color: var(--muted); margin: 6px 0; white-space: pre-wrap; }
+.approval .actions { display: flex; gap: 8px; margin-top: 8px; }
+.approval .actions input { flex: 1; }
+button.reject { background: var(--err); color: #1a0d0d; }
+button.ghost { background: transparent; color: var(--text); border: 1px solid var(--line); }

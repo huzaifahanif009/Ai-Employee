@@ -48,7 +48,9 @@ async function boot() {
   await loadProjects();
   await loadWorkItems();
   await loadRuns();
+  await loadApprovals();
   openFleetStream();
+  setInterval(loadApprovals, 4000); // belt-and-braces alongside the SSE-triggered refresh
 }
 
 async function loadProjects() {
@@ -116,6 +118,62 @@ function openFleetStream() {
   fleetSse.onmessage = () => {};
   ['run.state_changed', 'run.completed', 'run.totals_updated', 'run.created'].forEach((t) =>
     fleetSse.addEventListener(t, () => loadRuns()));
+  ['approval.requested', 'approval.decided', 'approval.expired'].forEach((t) =>
+    fleetSse.addEventListener(t, () => loadApprovals()));
+}
+
+// ---------- approvals ----------
+async function loadApprovals() {
+  let items;
+  try { items = await api('/approvals?state=open'); } catch { return; }
+  const list = $('#approvals-list');
+  $('#approvals-count').textContent = `${items.length} open`;
+  if (items.length === 0) { list.className = 'muted'; list.textContent = 'No open approvals.'; return; }
+  list.className = '';
+  list.innerHTML = '';
+  items.forEach((a) => list.appendChild(renderApproval(a)));
+}
+
+function renderApproval(a) {
+  const box = el('div', 'approval');
+  const slaMs = new Date(a.slaAt).getTime() - Date.now();
+  const urgent = slaMs < 15 * 60 * 1000;
+
+  const head = el('div', 'head');
+  head.appendChild(el('span', 'type', `${a.type} · run ${a.runId.slice(0, 8)}`));
+  head.appendChild(el('span', 'sla' + (urgent ? ' urgent' : ''), slaLabel(slaMs)));
+  box.appendChild(head);
+
+  const evidence = a.evidence || {};
+  const summary = evidence.summary || (evidence.steps ? evidence.steps.map((s) => `#${s.index} ${s.title}`).join('\n') : JSON.stringify(evidence));
+  box.appendChild(el('div', 'summary', summary));
+
+  const actions = el('div', 'actions');
+  const note = el('input', null); note.placeholder = 'note (required to reject)';
+  const approveBtn = el('button', null, 'Approve');
+  approveBtn.onclick = () => decideApproval(a.id, 'approve', note.value);
+  const rejectBtn = el('button', 'reject', 'Reject');
+  rejectBtn.onclick = () => {
+    if (!note.value.trim()) { note.focus(); note.placeholder = 'note required to reject ↑'; return; }
+    decideApproval(a.id, 'reject', note.value);
+  };
+  actions.append(approveBtn, rejectBtn, note);
+  box.appendChild(actions);
+  return box;
+}
+
+function slaLabel(ms) {
+  if (ms <= 0) return 'SLA passed';
+  const m = Math.round(ms / 60000);
+  return m < 60 ? `⏱ ${m}m left` : `⏱ ${Math.round(m / 60)}h left`;
+}
+
+async function decideApproval(id, decision, note) {
+  try {
+    await api(`/approvals/${id}/decision`, { method: 'POST', body: JSON.stringify({ decision, note: note || undefined }) });
+    loadApprovals();
+    loadRuns();
+  } catch (e) { alert(e.message); }
 }
 
 function setConn(live) {

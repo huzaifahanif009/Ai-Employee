@@ -12,7 +12,8 @@ export type ApprovalType =
   | 'budget'
   | 'review_block'
   | 'policy_exception'
-  | 'non_progress';
+  | 'non_progress'
+  | 'delivery';
 
 export type ApprovalState = 'open' | 'approved' | 'rejected' | 'expired' | 'auto_resolved';
 
