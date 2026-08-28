@@ -10,6 +10,7 @@ import type {
   Page,
   Project,
   Run,
+  ToolCall,
   WorkItem,
 } from "./types";
 
@@ -54,6 +55,15 @@ export function useRunModelCalls(runId: string | null, live: boolean) {
   return useQuery({
     queryKey: ["runs", runId ?? "", "model-calls"],
     queryFn: () => api.get<ModelCall[]>(`/runs/${runId}/model-calls`),
+    enabled: !!runId,
+    refetchInterval: live ? 3000 : false,
+  });
+}
+
+export function useRunToolCalls(runId: string | null, live: boolean) {
+  return useQuery({
+    queryKey: ["runs", runId ?? "", "tool-calls"],
+    queryFn: () => api.get<ToolCall[]>(`/runs/${runId}/tool-calls`),
     enabled: !!runId,
     refetchInterval: live ? 3000 : false,
   });

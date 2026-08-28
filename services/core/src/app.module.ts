@@ -13,6 +13,8 @@ import { HealthController } from './health/health.controller';
 import { ModelModule } from './model/model.module';
 import { ProjectsModule } from './projects/projects.module';
 import { RunsModule } from './runs/runs.module';
+import { SandboxModule } from './sandbox/sandbox.module';
+import { ToolsModule } from './tools/tools.module';
 import { WorkItemsModule } from './work-items/work-items.module';
 
 @Module({
@@ -35,7 +37,9 @@ import { WorkItemsModule } from './work-items/work-items.module';
     ProjectsModule,
     WorkItemsModule,
     ApprovalsModule,
+    SandboxModule,
     ModelModule,
+    ToolsModule,
     RunsModule,
   ],
   controllers: [HealthController],

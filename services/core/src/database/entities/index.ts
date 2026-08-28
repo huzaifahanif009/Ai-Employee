@@ -8,6 +8,7 @@ export * from './run-event.entity';
 export * from './approval.entity';
 export * from './audit-log.entity';
 export * from './model-call.entity';
+export * from './tool-call.entity';
 
 import { TenantEntity } from './tenant.entity';
 import { UserEntity } from './user.entity';
@@ -19,6 +20,7 @@ import { RunEventEntity } from './run-event.entity';
 import { ApprovalEntity } from './approval.entity';
 import { AuditLogEntity } from './audit-log.entity';
 import { ModelCallEntity } from './model-call.entity';
+import { ToolCallEntity } from './tool-call.entity';
 
 export const ALL_ENTITIES = [
   TenantEntity,
@@ -31,4 +33,5 @@ export const ALL_ENTITIES = [
   ApprovalEntity,
   AuditLogEntity,
   ModelCallEntity,
+  ToolCallEntity,
 ];

@@ -121,6 +121,11 @@ services:
     build:
       context: .
       dockerfile: services/core/Dockerfile
+    # docker-out-of-docker for the `docker` sandbox backend (ADR-0005, local/demo only).
+    # root + socket mount so it works regardless of the host's docker group GID.
+    user: root
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       postgres:
         condition: service_healthy
@@ -142,6 +147,9 @@ services:
       S3_ENDPOINT: http://minio:9000
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
       SEED_DEMO: "true"
+      SANDBOX_BACKEND: ${SANDBOX_BACKEND:-docker}
+      SANDBOX_IMAGE: praxis/sandbox:local
+      SANDBOX_DOCKER_NETWORK: bridge
     ports: ["3000:3000"]
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://localhost:3000/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]

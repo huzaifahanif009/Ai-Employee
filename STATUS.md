@@ -45,9 +45,24 @@ services/core/  (NestJS)   config (Joi-validated, fail-fast) · health · auth (
                           redaction, exact Redis cache, provider fallback chain, per-Run budget
                           check → soft = budget approval gate, hard = abort. `GET /model/catalog`,
                           `/model/health`, `/runs/:id/model-calls`. ·
-                          InprocRunDriver (DEMO advancer for M1; now makes 6 real metered model
-                          calls per run — triage/plan/code×3/review — the *advancement* is
-                          replaced by the orchestrator in P2, the gates + model calls are not)
+                          **Sandbox** (ADR-0005): `SandboxProvider` `docker` backend —
+                          `DockerSandboxProvider` shells the docker CLI against a mounted socket,
+                          builds its base image on first use, acquire/exec/writeFile/readFile/
+                          release, per-run container labelled + torn down. `none` backend for
+                          no-docker envs. (firecracker/gvisor = later.) ·
+                          **Tool Broker** (prd/09 §4): `ToolBrokerService` — native tools
+                          `shell.exec / fs.read|write|list / code.search / test.run / git.*`
+                          dispatched into the run's sandbox; `tool_call` ledger + `tool_call.*`
+                          events; risk-tier resolution (max of tool default + policy); `fs.write`
+                          path guard (no traversal / .git / CI config); `approve` tier → HITL
+                          gate; `git.push` = forbidden until a VCS connector exists.
+                          `GET /tools/catalog`, `/runs/:id/tool-calls` ·
+                          InprocRunDriver (DEMO advancer; now does **real work** — provisions a
+                          container, materialises a fixture repo, runs 6 metered model calls +
+                          ~12 real tool calls per run (fs.write / git.branch|add|commit / real
+                          `node --test` / git.diff), produces a real commit + unified diff, tears
+                          the sandbox down. The *advancement* is replaced by the orchestrator in
+                          P2; the gates, model calls and tool calls are not.)
 services/orchestrator/     Temporal RunWorkflow (deterministic step sequence, HITL signal gates,
   (skeleton, TS)           pause/resume/cancel) + activities + worker + client helper.
                           Not started by default (RUN_DRIVER=inproc). Wire in Phase 2.
@@ -62,8 +77,9 @@ services/dashboard/        **Next.js 16 + React 19 + Tailwind v4 + Radix (shadcn
                           folded from the event stream + Plan / Verification / Review / Delivery
                           tabs derived from events, pause/resume/cancel/comment, inline approval
                           card), Approvals inbox, Work Items (list + create dialog + start run).
-                          Run detail has a **Cost** tab (per-model call table from the ledger:
-                          purpose/role/model/in/out tokens/cost/latency/cache/redactions).
+                          Run detail tabs: Activity (live), Plan, **Changes** (fs.write list +
+                          syntax-coloured git.diff), **Tools** (tool_call ledger table),
+                          Verification, Review, Delivery, **Cost** (model_call ledger).
                           Sidebar shows the fuller prd/12 IA as a greyed "Roadmap" section.
 docker-compose.yml         postgres · postgres-temporal · redis · temporal(+ui) · minio(+setup) ·
                           litellm · otel-collector · core · migrate · agent · orchestrator(profile) ·
@@ -97,7 +113,7 @@ npm run -w @praxis/dashboard dev       # :3000 by default — set PORT=3001; bro
 
 - **Orchestrator not wired** — `RUN_DRIVER=inproc` runs a demo advancer inside core. Phase 2 swaps in the Temporal `RunWorkflow` (`RUN_DRIVER=temporal` + run `@praxis/orchestrator`) as the thing that *advances* a Run; the Approval gates built this session are driver-agnostic (raise via `ApprovalGateService.create()`, resume via signal instead of the in-memory waiter) so they carry over unchanged.
 - **WebSocket control channel** — pause/resume/comment currently go over REST; WS `/v1/control` is Phase 2.
-- **Sandbox** — `SandboxProvider` is interface-only; Firecracker/gVisor/docker backends + broker = Phase 1 P1-SBX-1 / Phase 2 P2-CORE-3.
+- **Sandbox** — `docker` backend + Tool Broker done for this slice. Follow-ups: Firecracker/gVisor backends (real isolation — the docker backend is explicitly *not* a boundary), egress allowlisting proxy, warm pool, snapshot/restore for pause/resume, per-Run scoped Git credentials (needs a VCS connector), a real repo clone (uses an in-container fixture today).
 - **Model Router — done for this slice** (`services/core/src/model/`). Follow-ups: DB-backed catalog with per-tenant overrides, tenant/project *monthly* budget caps (only per-Run enforced now), semantic cache, true token streaming (currently `stream()` chunks a completed response), OTel `gen_ai.*` spans, `/model/usage` aggregation endpoint for analytics.
 - **Risky-tool + review-block + non-progress approval gates** — plan / delivery / **budget** gates are wired; the other three gate types from prd/06 §5 use the same `ApprovalGateService` but aren't triggered by anything yet (no real tool execution or reviewer exists to trigger them).
 - **Connectors** (GitHub / EDAP Workdesk / Slack) — contracts defined; implementations = Phase 2. (Slack would also replace the dashboard-only approval decision path with ChatOps per `prd/09` §3.)

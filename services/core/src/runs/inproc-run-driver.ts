@@ -1,13 +1,40 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { RunFailureCategory, RunState } from '@praxis/event-schemas';
+import type { SandboxHandle, SandboxProvider } from '@praxis/contracts';
 import { Repository } from 'typeorm';
 import { ApprovalGateService } from '../approvals/approval-gate.service';
 import { AppConfig, CONFIG } from '../config/config';
 import { RunEntity } from '../database/entities';
 import { RunEventsService } from '../events/run-events.service';
 import { ModelRouterService } from '../model/model-router.service';
+import { SANDBOX_PROVIDER } from '../sandbox/sandbox.module';
+import { ToolBrokerService, ToolCtx } from '../tools/tool-broker.service';
 import { assertTransition } from './run-state-machine';
+
+/** Minimal Node fixture repo the demo materialises so `test.run` etc. have something real to act on. */
+const FIXTURE: Record<string, string> = {
+  'package.json': JSON.stringify(
+    { name: 'demo-app', version: '1.0.0', scripts: { test: 'node --test' } },
+    null,
+    2,
+  ),
+  'src/notify.js': `let attempts = 3;
+function send(fn) {
+  for (let i = 0; i < attempts; i++) {
+    try { return fn(); } catch (e) { if (i === attempts - 1) throw e; }
+  }
+}
+module.exports = { send, setAttempts: (n) => (attempts = n) };
+`,
+  'test/notify.test.js': `const test = require('node:test');
+const assert = require('node:assert');
+const { send } = require('../src/notify');
+test('send returns the value on success', () => {
+  assert.equal(send(() => 42), 42);
+});
+`,
+};
 
 interface Control {
   paused: boolean;
@@ -33,6 +60,8 @@ export class InprocRunDriver {
     private readonly events: RunEventsService,
     private readonly approvalGate: ApprovalGateService,
     private readonly modelRouter: ModelRouterService,
+    @Inject(SANDBOX_PROVIDER) private readonly sandbox: SandboxProvider,
+    private readonly tools: ToolBrokerService,
   ) {}
 
   pause(runId: string) {
@@ -53,6 +82,7 @@ export class InprocRunDriver {
     this.controls.set(runId, control);
     const t0 = Date.now();
     const projectId = (await this.runs.findOneByOrFail({ id: runId })).projectId;
+    let sbx: SandboxHandle | null = null;
 
     const step = async (to: RunState) => {
       await this.gate(control, runId);
@@ -162,43 +192,94 @@ export class InprocRunDriver {
         }
       }
 
+      // --- provision a real sandbox + fixture repo (ADR-0005 docker backend) ---
+      const repoDir = `${this.cfg.sandboxWorkdir}/repo`;
+      const toolCtx = (stepId?: string): ToolCtx => ({
+        tenantId, projectId, runId, stepId, agentRole: 'coder',
+        sandbox: sbx!, repoDir, testCommand: 'node --test',
+      });
+      const tool = async (name: string, input: Record<string, unknown>, stepId?: string) => {
+        const r = await this.tools.call(toolCtx(stepId), name, input);
+        await bump({ toolCalls: 1 });
+        return r;
+      };
+
+      try {
+        sbx = await this.sandbox.acquire({
+          runId, image: this.cfg.sandboxImage, cpuMillis: 1000, memoryMb: 1024, diskMb: 2048,
+          egress: { allowHosts: ['registry.npmjs.org'] }, ttlSeconds: 1800,
+        });
+        await emit('progress.warning', { runId, kind: 'sandbox_ready', evidence: `container ${sbx.id.slice(0, 12)}` });
+        await this.sandbox.execCollect(sbx, { cmd: ['sh', '-lc', `mkdir -p ${repoDir}`], timeoutMs: 10_000 });
+        for (const [path, content] of Object.entries(FIXTURE)) {
+          await this.sandbox.writeFile(sbx, `${repoDir}/${path}`, Buffer.from(content).toString('base64'));
+        }
+        await this.sandbox.execCollect(sbx, {
+          cmd: ['sh', '-lc', 'git init -q && git add -A && git commit -q -m "chore: fixture" && git branch -M main'],
+          cwd: repoDir, timeoutMs: 20_000,
+        });
+      } catch (err) {
+        this.log.warn(`sandbox unavailable, degrading to eventing-only: ${(err as Error).message}`);
+        await emit('progress.warning', { runId, kind: 'sandbox_unavailable', evidence: (err as Error).message });
+        sbx = null;
+      }
+
       // --- execute ---
       await step('executing');
       for (const s of steps) {
         if (control.cancelled) return this.finishCancelled(runId, tenantId);
         const stepId = `${runId}-s${s.index}`;
         await emit('run_step.started', { runId, stepId, index: s.index, role: 'coder', title: s.title });
-        await this.sleep(200, control, runId);
         await emit('message.delta', { runId, stepId, role: 'coder', deltaText: `Working on: ${s.title}. ` });
         await askModel('code', `Implement step ${s.index}: ${s.title}`, 'code', stepId);
-        await this.sleep(200, control, runId);
-        const tcId = `${stepId}-tc1`;
-        await emit('tool_call.started', {
-          runId, stepId, toolCallId: tcId, tool: s.index === 3 ? 'test.run' : 'fs.patch',
-          argsPreview: s.files[0], riskTier: 'notify',
-        });
-        await this.sleep(500, control, runId);
-        await emit('tool_call.finished', {
-          runId, stepId, toolCallId: tcId,
-          status: 'ok', durationMs: 480, bytesOut: 512,
-          outputPreview: s.index === 3 ? '3 passing' : `+18 -4 ${s.files[0]}`,
-        });
+
+        if (sbx) {
+          if (s.index === 1) await tool('fs.read', { path: 'src/notify.js' }, stepId);
+          if (s.index === 2)
+            await tool(
+              'fs.write',
+              { path: 'src/notify.js', content: FIXTURE['src/notify.js'].replace('let attempts = 3;', 'let attempts = 3; // retry policy: configurable\n') },
+              stepId,
+            );
+          if (s.index === 3)
+            await tool(
+              'fs.write',
+              { path: 'test/notify.test.js', content: FIXTURE['test/notify.test.js'] + `
+test('retries up to the configured number of attempts', () => {
+  let n = 0;
+  const { send, setAttempts } = require('../src/notify');
+  setAttempts(3);
+  assert.equal(send(() => { n++; if (n < 3) throw new Error('x'); return 'ok'; }), 'ok');
+});
+` },
+              stepId,
+            );
+          await tool('git.status', {}, stepId);
+        } else {
+          await this.sleep(400, control, runId);
+        }
         await emit('run_step.finished', { runId, stepId, state: 'succeeded', iterations: s.index === 2 ? 2 : 1 });
-        await bump({ toolCalls: 1, filesChanged: 1 });
+        await bump({ filesChanged: s.index === 1 ? 0 : 1 });
       }
 
-      // --- verify ---
+      // --- verify (real: run the tests in the sandbox) ---
       await step('verifying');
       await emit('verify.started', { runId });
-      for (const check of ['build', 'lint', 'unit'] as const) {
-        await emit('verify.check_started', { runId, check });
-        await this.sleep(400, control, runId);
+      let verifyPass = true;
+      if (sbx) {
+        const t = await tool('test.run', {});
+        verifyPass = t.status === 'ok';
         await emit('verify.check_finished', {
-          runId, check, result: 'pass',
-          summary: check === 'unit' ? '143 passed' : 'ok',
+          runId, check: 'unit', result: verifyPass ? 'pass' : 'fail',
+          summary: t.outputPreview.split('\n').slice(-3).join(' ').slice(0, 200),
         });
+      } else {
+        await emit('verify.check_finished', { runId, check: 'unit', result: 'pass', summary: '(eventing-only)' });
       }
-      await emit('verify.finished', { runId, overall: 'pass', coverageDelta: 0.4 });
+      await emit('verify.finished', { runId, overall: verifyPass ? 'pass' : 'fail' });
+      if (!verifyPass) {
+        return this.failRun(runId, tenantId, 'tests_never_passed', 'unit tests failed in the sandbox');
+      }
 
       // --- review ---
       await step('reviewing');
@@ -226,15 +307,28 @@ export class InprocRunDriver {
         }
       }
 
-      // --- deliver ---
+      // --- deliver (real git ops; push/PR need a VCS connector — Phase 2 P2-PROV) ---
       await step('delivering');
       const branch = `praxis/demo-${runId.slice(0, 8)}`;
-      await emit('git.branch.created', { runId, repo: 'demo/app', branch, baseSha: 'deadbeef' });
-      await emit('git.commit.created', { runId, sha: 'cafef00d', message: 'feat: add notification retry policy', filesChanged: 3 });
-      await emit('git.pushed', { runId, repo: 'demo/app', branch, headSha: 'cafef00d' });
-      const pr = { number: 1, url: `http://localhost:3001/demo/app/pulls/1`, state: 'open' as const };
-      await this.runs.update({ id: runId }, { branchName: branch, headSha: 'cafef00d', prRef: pr });
-      await emit('vcs.pr.opened', { runId, repo: 'demo/app', prNumber: pr.number, url: pr.url, state: 'open' });
+      let headSha = 'unknown';
+      let diffText = '';
+      if (sbx) {
+        await tool('git.branch', { name: branch });
+        await emit('git.branch.created', { runId, repo: 'local/demo', branch, baseSha: 'main' });
+        await tool('git.add', {});
+        const diff = await tool('git.diff', { staged: true });
+        diffText = diff.outputPreview;
+        await tool('git.commit', { message: 'feat: make notification retry count configurable\n\nCloses the demo work item.' });
+        const log = await tool('git.log', {});
+        headSha = (log.outputPreview.trim().split(/\s/)[0] || 'unknown').slice(0, 12);
+        await emit('git.commit.created', { runId, sha: headSha, message: 'feat: make notification retry count configurable', filesChanged: 2 });
+      }
+      await this.runs.update({ id: runId }, { branchName: branch, headSha, prRef: null });
+      await emit('vcs.pr.updated', {
+        runId, repo: 'local/demo', prNumber: 0, url: '', state: 'no_connector',
+        note: 'branch + patch produced; connect a VCS provider to open a PR',
+        diffPreview: diffText.slice(0, 4000),
+      });
 
       // --- done ---
       const run = await this.runs.findOneByOrFail({ id: runId });
@@ -246,7 +340,7 @@ export class InprocRunDriver {
         payload: { runId, from: 'delivering', to: 'succeeded' },
         actor: { kind: 'system', id: 'inproc-driver' },
       });
-      await emit('run.completed', { runId, outcome: 'succeeded', prUrl: pr.url });
+      await emit('run.completed', { runId, outcome: 'succeeded' });
     } catch (err) {
       this.log.error(`run ${runId}: ${(err as Error).message}`);
       const run = await this.runs.findOneBy({ id: runId });
@@ -263,6 +357,9 @@ export class InprocRunDriver {
       }
     } finally {
       this.controls.delete(runId);
+      if (sbx) {
+        await this.sandbox.release(sbx).catch((e) => this.log.warn(`sandbox release: ${(e as Error).message}`));
+      }
     }
   }
 

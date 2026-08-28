@@ -140,6 +140,23 @@ export interface ModelCall {
   createdAt: string;
 }
 
+export interface ToolCall {
+  id: string;
+  runId: string;
+  runStepId: string | null;
+  seq: number;
+  toolName: string;
+  execution: "sandbox" | "control-plane";
+  riskTier: "auto" | "notify" | "approve" | "forbidden";
+  input: Record<string, unknown>;
+  outputPreview: string;
+  status: "ok" | "error" | "denied" | "needs_approval";
+  durationMs: number;
+  bytesOut: number;
+  error: string | null;
+  createdAt: string;
+}
+
 export interface ModelCatalogEntry {
   alias: string;
   provider: string;

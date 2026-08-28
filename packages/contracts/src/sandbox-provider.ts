@@ -44,7 +44,9 @@ export interface ExecResult {
   exitCode: number;
   durationMs: number;
   truncated: boolean;
-  /** object-storage key of the full captured output */
+  /** combined stdout+stderr, bounded (see `truncated`) */
+  output: string;
+  /** object-storage key of the full captured output, when truncated */
   fullOutputRef?: string;
 }
 

@@ -13,7 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { authErrorMessage } from "@/lib/auth";
 import { deriveDelivery, derivePlan, deriveReview, deriveSteps, deriveVerification } from "@/lib/derive";
-import { useApprovals, useRun, useRunControl, useRunModelCalls } from "@/lib/hooks";
+import { useApprovals, useRun, useRunControl, useRunModelCalls, useRunToolCalls } from "@/lib/hooks";
 import { useRunStream } from "@/lib/sse";
 import { formatTokens, formatUsd, shortId } from "@/lib/utils";
 
@@ -29,6 +29,9 @@ export default function RunDetailPage() {
 
   const terminalNow = !!run && TERMINAL.has(run.state);
   const { data: modelCalls } = useRunModelCalls(id, !terminalNow);
+  const { data: toolCalls } = useRunToolCalls(id, !terminalNow);
+  const lastDiff = [...(toolCalls ?? [])].reverse().find((t) => t.toolName === "git.diff")?.outputPreview;
+  const writes = (toolCalls ?? []).filter((t) => t.toolName === "fs.write" && t.status === "ok");
 
   const runApprovals = (openApprovals ?? []).filter((a) => a.runId === id);
   const plan = derivePlan(events);
@@ -137,6 +140,8 @@ export default function RunDetailPage() {
             <TabsList>
               <TabsTrigger value="activity">Activity</TabsTrigger>
               <TabsTrigger value="plan">Plan{plan ? ` (${plan.stepCount})` : ""}</TabsTrigger>
+              <TabsTrigger value="changes">Changes{writes.length ? ` (${writes.length})` : ""}</TabsTrigger>
+              <TabsTrigger value="tools">Tools{toolCalls?.length ? ` (${toolCalls.length})` : ""}</TabsTrigger>
               <TabsTrigger value="verify">Verification</TabsTrigger>
               <TabsTrigger value="review">Review</TabsTrigger>
               <TabsTrigger value="delivery">Delivery</TabsTrigger>
@@ -211,6 +216,77 @@ export default function RunDetailPage() {
                   </ol>
                 </div>
               )}
+            </TabsContent>
+
+            <TabsContent value="changes">
+              {!lastDiff && writes.length === 0 && (
+                <p className="text-sm text-muted">No file changes yet.</p>
+              )}
+              {writes.length > 0 && (
+                <ul className="mb-3 space-y-1 text-sm">
+                  {writes.map((w) => (
+                    <li key={w.id} className="font-mono text-xs text-muted">
+                      + {String((w.input as { path?: string }).path ?? "")}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {lastDiff && (
+                <pre className="scroll-thin max-h-[420px] overflow-auto rounded-lg border border-line bg-bg p-3 font-mono text-xs leading-relaxed">
+                  {lastDiff.split("\n").map((l, i) => (
+                    <div
+                      key={i}
+                      className={
+                        l.startsWith("+") && !l.startsWith("+++")
+                          ? "text-ok"
+                          : l.startsWith("-") && !l.startsWith("---")
+                            ? "text-err"
+                            : l.startsWith("@@")
+                              ? "text-accent"
+                              : "text-text"
+                      }
+                    >
+                      {l || " "}
+                    </div>
+                  ))}
+                </pre>
+              )}
+            </TabsContent>
+
+            <TabsContent value="tools">
+              {(toolCalls?.length ?? 0) === 0 && (
+                <p className="text-sm text-muted">No tool calls yet.</p>
+              )}
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-xs text-muted">
+                    <th className="pb-2 font-medium">#</th>
+                    <th className="pb-2 font-medium">Tool</th>
+                    <th className="pb-2 font-medium">Risk</th>
+                    <th className="pb-2 font-medium">Status</th>
+                    <th className="pb-2 font-medium">ms</th>
+                    <th className="pb-2 font-medium">Output</th>
+                  </tr>
+                </thead>
+                <tbody className="font-mono text-xs">
+                  {toolCalls?.map((t) => (
+                    <tr key={t.id} className="border-t border-line align-top">
+                      <td className="py-1.5 text-muted">{t.seq}</td>
+                      <td className="py-1.5">{t.toolName}</td>
+                      <td className="py-1.5 text-muted">{t.riskTier}</td>
+                      <td
+                        className={`py-1.5 ${t.status === "ok" ? "text-ok" : t.status === "denied" ? "text-warn" : "text-err"}`}
+                      >
+                        {t.status}
+                      </td>
+                      <td className="py-1.5 tabular-nums">{t.durationMs}</td>
+                      <td className="py-1.5 max-w-md truncate text-muted">
+                        {t.outputPreview.replace(/\n/g, " ").slice(0, 120)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </TabsContent>
 
             <TabsContent value="verify">
