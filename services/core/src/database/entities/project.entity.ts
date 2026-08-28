@@ -44,6 +44,13 @@ export class ProjectEntity {
   @Column({ type: 'uuid', nullable: true })
   vcsConnectorId!: string | null;
 
+  @Column({ type: 'uuid', nullable: true })
+  trackerConnectorId!: string | null;
+
+  /** last tracker poll cursor (ISO ts) */
+  @Column({ type: 'text', nullable: true })
+  intakeCursor!: string | null;
+
   @Column({ default: 'main' })
   baseBranch!: string;
 

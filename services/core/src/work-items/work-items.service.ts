@@ -28,6 +28,16 @@ export class WorkItemsService {
     return w;
   }
 
+  findByExternal(projectId: string, connectorId: string, externalId: string) {
+    return this.repo.findOne({
+      where: { projectId, sourceConnectorId: connectorId, externalId },
+    });
+  }
+
+  findById(tenantId: string, id: string) {
+    return this.repo.findOne({ where: { id, tenantId } });
+  }
+
   /** Manual creation (FR-INTAKE-4). */
   createManual(
     tenantId: string,

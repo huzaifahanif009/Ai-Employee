@@ -7,6 +7,7 @@ import { Init1724900000000 } from './migrations/1724900000000-init';
 import { ModelCall1725100000000 } from './migrations/1725100000000-model-call';
 import { ToolCall1725200000000 } from './migrations/1725200000000-tool-call';
 import { Connector1725300000000 } from './migrations/1725300000000-connector';
+import { Tracker1725400000000 } from './migrations/1725400000000-tracker';
 
 const cfg = loadConfig();
 
@@ -20,6 +21,7 @@ export const AppDataSource = new DataSource({
     ModelCall1725100000000,
     ToolCall1725200000000,
     Connector1725300000000,
+    Tracker1725400000000,
   ],
   migrationsRun: false,
   synchronize: false,

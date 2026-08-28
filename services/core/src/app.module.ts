@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { APP_FILTER, APP_GUARD } from '@nestjs/core';
+import { ScheduleModule } from '@nestjs/schedule';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AppConfig, CONFIG } from './config/config';
 import { ConfigModule } from './config/config.module';
@@ -11,6 +12,7 @@ import { ConnectorsModule } from './connectors/connectors.module';
 import { ProblemDetailsFilter } from './common/problem-details.filter';
 import { EventsModule } from './events/events.module';
 import { HealthController } from './health/health.controller';
+import { IntakeModule } from './intake/intake.module';
 import { ModelModule } from './model/model.module';
 import { ProjectsModule } from './projects/projects.module';
 import { RunsModule } from './runs/runs.module';
@@ -21,6 +23,7 @@ import { WorkItemsModule } from './work-items/work-items.module';
 @Module({
   imports: [
     ConfigModule,
+    ScheduleModule.forRoot(),
     TypeOrmModule.forRootAsync({
       inject: [CONFIG],
       useFactory: (cfg: AppConfig) => ({
@@ -43,6 +46,7 @@ import { WorkItemsModule } from './work-items/work-items.module';
     ModelModule,
     ToolsModule,
     RunsModule,
+    IntakeModule,
   ],
   controllers: [HealthController],
   providers: [

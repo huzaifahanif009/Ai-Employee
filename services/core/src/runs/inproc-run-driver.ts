@@ -11,6 +11,7 @@ import { RunEventsService } from '../events/run-events.service';
 import { ModelRouterService } from '../model/model-router.service';
 import { SANDBOX_PROVIDER } from '../sandbox/sandbox.module';
 import { ToolBrokerService, ToolCtx } from '../tools/tool-broker.service';
+import { WorkItemsService } from '../work-items/work-items.service';
 import { assertTransition } from './run-state-machine';
 
 /** strip `oauth2:<token>@` / `x-access-token:<token>@` from any string before it's logged/evented */
@@ -68,6 +69,7 @@ export class InprocRunDriver {
     @Inject(SANDBOX_PROVIDER) private readonly sandbox: SandboxProvider,
     private readonly tools: ToolBrokerService,
     private readonly connectors: ConnectorsService,
+    private readonly workItems: WorkItemsService,
   ) {}
 
   pause(runId: string) {
@@ -87,9 +89,12 @@ export class InprocRunDriver {
     const control: Control = { paused: false, cancelled: false };
     this.controls.set(runId, control);
     const t0 = Date.now();
-    const projectId = (await this.runs.findOneByOrFail({ id: runId })).projectId;
+    const runRow = await this.runs.findOneByOrFail({ id: runId });
+    const projectId = runRow.projectId;
     let sbx: SandboxHandle | null = null;
     const vcs = await this.connectors.resolveForProject(tenantId, projectId).catch(() => null);
+    const tracker = await this.connectors.resolveTrackerForProject(tenantId, projectId).catch(() => null);
+    const workItem = await this.workItems.findById(tenantId, runRow.workItemId).catch(() => null);
 
     const step = async (to: RunState) => {
       await this.gate(control, runId);
@@ -398,6 +403,14 @@ test('retries up to the configured number of attempts', () => {
             );
             prRef = { number: mr.number, url: mr.url, state: mr.state };
             await emit('vcs.pr.opened', { runId, repo: String(vcs.connector.config.projectPath), prNumber: mr.number, url: mr.url, state: mr.state });
+
+            // write back to the source issue, if this work item came from a tracker
+            if (tracker && workItem && workItem.sourceConnectorId !== 'manual' && tracker.provider.linkPullRequest) {
+              await tracker.provider
+                .linkPullRequest(workItem.externalId, mr.url)
+                .then(() => emit('progress.warning', { runId, kind: 'tracker_linked', evidence: `issue #${workItem.externalId}` }))
+                .catch((e) => this.log.warn(`tracker write-back: ${(e as Error).message}`));
+            }
           } catch (e) {
             await emit('progress.warning', { runId, kind: 'mr_create_failed', evidence: (e as Error).message });
           }

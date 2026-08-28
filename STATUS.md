@@ -55,6 +55,15 @@ services/core/  (NestJS)   config (Joi-validated, fail-fast) · health · auth (
                           slot into the same `resolveVcs()` switch (not yet implemented).
                           `GET/POST/PATCH/DELETE /connectors`, `/connectors/:id/test|repos`.
                           Project gains `vcsConnectorId` + `repoRef.path`. ·
+                          **Tracker + Intake** (prd/09 §2): `GitLabTrackerProvider` — GitLab
+                          issues as work items (list/get/normalize w/ acceptance-criteria
+                          parsing, comment, close/reopen, poll, webhook normalize). A GitLab
+                          connector now serves **both** contracts (`['vcs','tracker']`).
+                          `IntakeService` — `@Cron` poll (once/min) + `POST /projects/:id/intake/
+                          sync` + public `POST /webhooks/in/:connectorId` (GitLab issue hook) →
+                          idempotent `upsertFromDraft`, auto-start runs if `intake.mode=auto`,
+                          per-project cursor. On MR open the run comments the source issue with
+                          the MR link. Project gains `trackerConnectorId` + `intakeCursor`. ·
                           **Sandbox** (ADR-0005): `SandboxProvider` `docker` backend —
                           `DockerSandboxProvider` shells the docker CLI against a mounted socket,
                           builds its base image on first use, acquire/exec/writeFile/readFile/
@@ -129,7 +138,7 @@ npm run -w @praxis/dashboard dev       # :3000 by default — set PORT=3001; bro
 - **Sandbox** — `docker` backend + Tool Broker done for this slice. Follow-ups: Firecracker/gVisor backends (real isolation — the docker backend is explicitly *not* a boundary), egress allowlisting proxy, warm pool, snapshot/restore for pause/resume, per-Run scoped Git credentials (needs a VCS connector), a real repo clone (uses an in-container fixture today).
 - **Model Router — done for this slice** (`services/core/src/model/`). Follow-ups: DB-backed catalog with per-tenant overrides, tenant/project *monthly* budget caps (only per-Run enforced now), semantic cache, true token streaming (currently `stream()` chunks a completed response), OTel `gen_ai.*` spans, `/model/usage` aggregation endpoint for analytics.
 - **Risky-tool + review-block + non-progress approval gates** — plan / delivery / **budget** gates are wired; the other three gate types from prd/06 §5 use the same `ApprovalGateService` but aren't triggered by anything yet (no real tool execution or reviewer exists to trigger them).
-- **Connectors** — **GitLab VCS connector done** (self-hosted supported; verified reaching `gitlab.edap.com.pk` — needs a real `glpat-` token to go healthy). Follow-ups: GitHub + Bitbucket VcsProvider impls, EDAP Workdesk + Jira + Linear trackers, Slack ChatOps (would move approval decisions out of the dashboard-only path per `prd/09` §3), inbound webhook ingestion route, per-Run scoped project access tokens instead of the stored PAT, move the token store behind a real `SecretsProvider` (Infisical).
+- **Connectors** — **GitLab VCS + issue tracker done and verified against a real self-hosted instance** (`gitlab.edap.com.pk/huzaifahanif307/calculator` — connector healthy, a run cloned it and opened real MR !2). Follow-ups: GitHub + Bitbucket VcsProviders, EDAP Workdesk + Jira + Linear trackers, Slack ChatOps (would move approval decisions out of the dashboard-only path per `prd/09` §3), MR-merge webhook → close the issue + WI, per-Run scoped project access tokens instead of the stored PAT, move the token store behind a real `SecretsProvider` (Infisical).
 - **Dashboard** — real Next.js app now covers the core loop (login → work items → runs → live run detail → approvals). Not yet built from prd/12: Projects / Agents & Policies / Analytics / Integrations / System Health / Audit Log screens (shown as a "Roadmap" section in the sidebar); WebSocket for control actions (uses REST); virtualized lists; a11y audit.
 - **Dashboard framework decision** — Next.js (per user direction — separate from the EDAP Workdesk Angular app), not Angular. `prd/04` §15 / `prd/12` §1 name Angular as the default with Next.js an accepted alternative; the alternative was chosen. ADR update pending.
 - **Toolchain** — pinned below PRD targets (Node 20 / Python 3.10 / npm), see ADR-0011.

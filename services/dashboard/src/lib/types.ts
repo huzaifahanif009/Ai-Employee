@@ -21,7 +21,9 @@ export interface Project {
   tenantId: string;
   name: string;
   slug: string;
-  repoRef: { provider: string; owner: string; name: string } | null;
+  repoRef: { provider: string; owner: string; name: string; path?: string } | null;
+  vcsConnectorId: string | null;
+  trackerConnectorId: string | null;
   baseBranch: string;
   verifyPipeline: Record<string, string>;
   intake: { mode: "auto" | "manual"; labelAllowlist: string[] };

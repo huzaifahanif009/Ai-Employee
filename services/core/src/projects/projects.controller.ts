@@ -10,6 +10,7 @@ class CreateProjectDto {
   @IsOptional() @IsString() slug?: string;
   @IsOptional() @IsObject() repoRef?: { provider: string; owner: string; name: string; path?: string };
   @IsOptional() @IsString() vcsConnectorId?: string | null;
+  @IsOptional() @IsString() trackerConnectorId?: string | null;
   @IsOptional() @IsString() baseBranch?: string;
   @IsOptional() @IsObject() verifyPipeline?: Record<string, string>;
   @IsOptional() @IsObject() intake?: any;

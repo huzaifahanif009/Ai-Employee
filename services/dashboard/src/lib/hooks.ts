@@ -84,14 +84,29 @@ export function useBindProjectRepo() {
       vcsConnectorId: string;
       repoRef: { provider: string; owner: string; name: string; path: string };
     }) =>
+      // a GitLab connector serves both contracts — bind it as VCS *and* tracker
       api.patch<Project>(`/projects/${input.projectId}`, {
         vcsConnectorId: input.vcsConnectorId,
+        trackerConnectorId: input.vcsConnectorId,
         repoRef: input.repoRef,
+        intake: { mode: "manual", labelAllowlist: [] },
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["projects"] });
       qc.invalidateQueries({ queryKey: ["connectors"] });
+      qc.invalidateQueries({ queryKey: ["work-items"] });
     },
+  });
+}
+
+export function useSyncIntake() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (projectId: string) =>
+      api.post<{ polled: number; created: number; started: number }>(
+        `/projects/${projectId}/intake/sync`,
+      ),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["work-items"] }),
   });
 }
 

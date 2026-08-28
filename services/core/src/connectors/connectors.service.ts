@@ -3,9 +3,11 @@ import { InjectRepository } from "@nestjs/typeorm";
 import { notFound, PraxisError } from "@praxis/contracts";
 import type { VcsProvider } from "@praxis/contracts";
 import { Repository } from "typeorm";
+import type { TrackerProvider } from "@praxis/contracts";
 import { decryptSecret, deriveKey, encryptSecret, secretHint } from "../common/crypto";
 import { AppConfig, CONFIG } from "../config/config";
 import { ConnectorEntity, ConnectorKind, ProjectEntity } from "../database/entities";
+import { GitLabTrackerProvider } from "../tracker/gitlab.tracker";
 import { GitLabVcsProvider } from "../vcs/gitlab.provider";
 
 export interface CreateConnectorInput {
@@ -66,7 +68,7 @@ export class ConnectorsService {
       tenantId,
       kind: input.kind,
       name: input.name,
-      contracts: ["vcs"],
+      contracts: ["vcs", "tracker"], // GitLab connectors serve both (VcsProvider + issue TrackerProvider)
       config: { baseUrl: String(input.config.baseUrl).replace(/\/$/, ""), projectPath: input.config.projectPath ?? null },
       authKind: "token",
       secretCiphertext: encryptSecret(input.token, this.key),
@@ -128,6 +130,37 @@ export class ConnectorsService {
       default:
         throw new PraxisError("VCS_ERROR", `no VcsProvider for kind ${c.kind}`, 500);
     }
+  }
+
+  resolveTracker(c: ConnectorEntity): TrackerProvider {
+    if (!c.secretCiphertext) throw new PraxisError("VCS_ERROR", "connector has no credential", 400);
+    const token = decryptSecret(c.secretCiphertext, this.key);
+    if (c.kind !== "gitlab") throw new PraxisError("VCS_ERROR", `no TrackerProvider for kind ${c.kind}`, 500);
+    return new GitLabTrackerProvider({
+      baseUrl: String(c.config.baseUrl),
+      projectPath: String(c.config.projectPath ?? ""),
+      token,
+    });
+  }
+
+  async getForTenant(tenantId: string, id: string): Promise<ConnectorEntity | null> {
+    return this.repo.findOne({ where: { id, tenantId } });
+  }
+
+  /** tenant-agnostic — only for the public webhook route, which authenticates by connector id + optional token */
+  async findAnyById(id: string): Promise<ConnectorEntity | null> {
+    return this.repo.findOne({ where: { id } });
+  }
+
+  async resolveTrackerForProject(
+    tenantId: string,
+    projectId: string,
+  ): Promise<{ provider: TrackerProvider; connector: ConnectorEntity } | null> {
+    const project = await this.projects.findOne({ where: { id: projectId, tenantId } });
+    if (!project?.trackerConnectorId) return null;
+    const c = await this.repo.findOne({ where: { id: project.trackerConnectorId, tenantId } });
+    if (!c?.secretCiphertext) return null;
+    return { provider: this.resolveTracker(c), connector: c };
   }
 
   /** For the run flow: resolve the provider + decrypted token for a project's bound connector. */

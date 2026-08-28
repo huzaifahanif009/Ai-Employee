@@ -9,6 +9,7 @@ export interface CreateProjectInput {
   slug?: string;
   repoRef?: { provider: string; owner: string; name: string; path?: string } | null;
   vcsConnectorId?: string | null;
+  trackerConnectorId?: string | null;
   baseBranch?: string;
   pathScope?: string | null;
   verifyPipeline?: Record<string, string>;

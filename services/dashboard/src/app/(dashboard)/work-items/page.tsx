@@ -1,6 +1,6 @@
 "use client";
 
-import { Play, Plus } from "lucide-react";
+import { ExternalLink, Play, Plus, RefreshCw } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -12,15 +12,24 @@ import { Input, Textarea } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { authErrorMessage } from "@/lib/auth";
-import { useCreateWorkItem, useProjects, useStartRun, useWorkItems } from "@/lib/hooks";
+import {
+  useCreateWorkItem,
+  useProjects,
+  useStartRun,
+  useSyncIntake,
+  useWorkItems,
+} from "@/lib/hooks";
 import { relativeTime } from "@/lib/utils";
 
 export default function WorkItemsPage() {
   const { data: projects } = useProjects();
   const { data: items, isLoading } = useWorkItems();
   const startRun = useStartRun();
+  const sync = useSyncIntake();
   const router = useRouter();
   const [open, setOpen] = useState(false);
+  const project = projects?.[0];
+  const hasTracker = !!project?.trackerConnectorId;
 
   async function onStart(workItemId: string) {
     try {
@@ -34,7 +43,23 @@ export default function WorkItemsPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex justify-end">
+      <div className="flex items-center justify-end gap-2">
+        {hasTracker && (
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={sync.isPending}
+            onClick={() =>
+              sync
+                .mutateAsync(project!.id)
+                .then((r) => toast.success(`Polled ${r.polled} — ${r.created} new`))
+                .catch((e) => toast.error(authErrorMessage(e)))
+            }
+          >
+            <RefreshCw className={`h-4 w-4 ${sync.isPending ? "animate-spin" : ""}`} />
+            Sync from tracker
+          </Button>
+        )}
         <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger asChild>
             <Button size="sm">
@@ -43,10 +68,7 @@ export default function WorkItemsPage() {
             </Button>
           </DialogTrigger>
           <DialogContent title="New work item">
-            <CreateWorkItemForm
-              projectId={projects?.[0]?.id}
-              onDone={() => setOpen(false)}
-            />
+            <CreateWorkItemForm projectId={project?.id} onDone={() => setOpen(false)} />
           </DialogContent>
         </Dialog>
       </div>
@@ -82,12 +104,24 @@ export default function WorkItemsPage() {
               {items?.map((w) => (
                 <tr key={w.id} className="border-t border-line">
                   <td className="max-w-md py-2.5">
-                    <div className="font-medium">{w.title}</div>
-                    {w.acceptanceCriteria.length > 0 && (
-                      <div className="text-xs text-muted">
-                        {w.acceptanceCriteria.length} acceptance criteria
-                      </div>
-                    )}
+                    <div className="flex items-center gap-1.5 font-medium">
+                      {w.title}
+                      {w.externalUrl && (
+                        <a
+                          href={w.externalUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-muted hover:text-accent"
+                          title={`${w.sourceConnectorId} · ${w.externalId}`}
+                        >
+                          <ExternalLink className="h-3 w-3" />
+                        </a>
+                      )}
+                    </div>
+                    <div className="text-xs text-muted">
+                      {w.sourceConnectorId === "manual" ? "manual" : "gitlab issue"}
+                      {w.acceptanceCriteria.length > 0 && ` · ${w.acceptanceCriteria.length} AC`}
+                    </div>
                   </td>
                   <td className="py-2.5">
                     <WorkItemStateChip state={w.state} />
