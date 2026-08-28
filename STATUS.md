@@ -45,6 +45,16 @@ services/core/  (NestJS)   config (Joi-validated, fail-fast) · health · auth (
                           redaction, exact Redis cache, provider fallback chain, per-Run budget
                           check → soft = budget approval gate, hard = abort. `GET /model/catalog`,
                           `/model/health`, `/runs/:id/model-calls`. ·
+                          **Connectors + VCS** (prd/08–09): `connector` table (AES-256-GCM
+                          token encryption at rest via common/crypto — interim, `SecretsProvider`
+                          later), `ConnectorsService` (CRUD / test / browse repos; API never
+                          returns the ciphertext or raw token, only a `••••1234` hint),
+                          `GitLabVcsProvider implements VcsProvider` — REST v4, **self-hosted or
+                          SaaS** (configurable base URL), MR create/update, notes, pipelines,
+                          protected branches, project hooks + webhook normalize. GitHub/Bitbucket
+                          slot into the same `resolveVcs()` switch (not yet implemented).
+                          `GET/POST/PATCH/DELETE /connectors`, `/connectors/:id/test|repos`.
+                          Project gains `vcsConnectorId` + `repoRef.path`. ·
                           **Sandbox** (ADR-0005): `SandboxProvider` `docker` backend —
                           `DockerSandboxProvider` shells the docker CLI against a mounted socket,
                           builds its base image on first use, acquire/exec/writeFile/readFile/
@@ -58,11 +68,13 @@ services/core/  (NestJS)   config (Joi-validated, fail-fast) · health · auth (
                           gate; `git.push` = forbidden until a VCS connector exists.
                           `GET /tools/catalog`, `/runs/:id/tool-calls` ·
                           InprocRunDriver (DEMO advancer; now does **real work** — provisions a
-                          container, materialises a fixture repo, runs 6 metered model calls +
-                          ~12 real tool calls per run (fs.write / git.branch|add|commit / real
-                          `node --test` / git.diff), produces a real commit + unified diff, tears
-                          the sandbox down. The *advancement* is replaced by the orchestrator in
-                          P2; the gates, model calls and tool calls are not.)
+                          container; if the project has a bound VCS connector it **clones the
+                          real repo, makes a small safe change, pushes the branch and opens a
+                          real MR/PR** (token redacted from all logs/events); otherwise it
+                          materialises a fixture repo + runs real `node --test`. 6 metered model
+                          calls + ~12 real tool calls per run, real commit + unified diff,
+                          sandbox torn down. The *advancement* is replaced by the orchestrator in
+                          P2; the gates, model calls, tool calls and VCS delivery are not.)
 services/orchestrator/     Temporal RunWorkflow (deterministic step sequence, HITL signal gates,
   (skeleton, TS)           pause/resume/cancel) + activities + worker + client helper.
                           Not started by default (RUN_DRIVER=inproc). Wire in Phase 2.
@@ -77,10 +89,11 @@ services/dashboard/        **Next.js 16 + React 19 + Tailwind v4 + Radix (shadcn
                           folded from the event stream + Plan / Verification / Review / Delivery
                           tabs derived from events, pause/resume/cancel/comment, inline approval
                           card), Approvals inbox, Work Items (list + create dialog + start run).
-                          Run detail tabs: Activity (live), Plan, **Changes** (fs.write list +
-                          syntax-coloured git.diff), **Tools** (tool_call ledger table),
-                          Verification, Review, Delivery, **Cost** (model_call ledger).
-                          Sidebar shows the fuller prd/12 IA as a greyed "Roadmap" section.
+                          Run detail tabs: Activity (live), Plan, Changes, Tools, Verification,
+                          Review, Delivery, Cost. **Integrations screen** — add/test/delete a
+                          GitLab connector (base URL + project path + token, password field),
+                          browse its repositories, bind one to the demo project. Sidebar nav now
+                          includes Integrations; the rest of prd/12 stays a greyed "Roadmap".
 docker-compose.yml         postgres · postgres-temporal · redis · temporal(+ui) · minio(+setup) ·
                           litellm · otel-collector · core · migrate · agent · orchestrator(profile) ·
                           dashboard · gitea(profile: demo)
@@ -116,7 +129,7 @@ npm run -w @praxis/dashboard dev       # :3000 by default — set PORT=3001; bro
 - **Sandbox** — `docker` backend + Tool Broker done for this slice. Follow-ups: Firecracker/gVisor backends (real isolation — the docker backend is explicitly *not* a boundary), egress allowlisting proxy, warm pool, snapshot/restore for pause/resume, per-Run scoped Git credentials (needs a VCS connector), a real repo clone (uses an in-container fixture today).
 - **Model Router — done for this slice** (`services/core/src/model/`). Follow-ups: DB-backed catalog with per-tenant overrides, tenant/project *monthly* budget caps (only per-Run enforced now), semantic cache, true token streaming (currently `stream()` chunks a completed response), OTel `gen_ai.*` spans, `/model/usage` aggregation endpoint for analytics.
 - **Risky-tool + review-block + non-progress approval gates** — plan / delivery / **budget** gates are wired; the other three gate types from prd/06 §5 use the same `ApprovalGateService` but aren't triggered by anything yet (no real tool execution or reviewer exists to trigger them).
-- **Connectors** (GitHub / EDAP Workdesk / Slack) — contracts defined; implementations = Phase 2. (Slack would also replace the dashboard-only approval decision path with ChatOps per `prd/09` §3.)
+- **Connectors** — **GitLab VCS connector done** (self-hosted supported; verified reaching `gitlab.edap.com.pk` — needs a real `glpat-` token to go healthy). Follow-ups: GitHub + Bitbucket VcsProvider impls, EDAP Workdesk + Jira + Linear trackers, Slack ChatOps (would move approval decisions out of the dashboard-only path per `prd/09` §3), inbound webhook ingestion route, per-Run scoped project access tokens instead of the stored PAT, move the token store behind a real `SecretsProvider` (Infisical).
 - **Dashboard** — real Next.js app now covers the core loop (login → work items → runs → live run detail → approvals). Not yet built from prd/12: Projects / Agents & Policies / Analytics / Integrations / System Health / Audit Log screens (shown as a "Roadmap" section in the sidebar); WebSocket for control actions (uses REST); virtualized lists; a11y audit.
 - **Dashboard framework decision** — Next.js (per user direction — separate from the EDAP Workdesk Angular app), not Angular. `prd/04` §15 / `prd/12` §1 name Angular as the default with Next.js an accepted alternative; the alternative was chosen. ADR update pending.
 - **Toolchain** — pinned below PRD targets (Node 20 / Python 3.10 / npm), see ADR-0011.

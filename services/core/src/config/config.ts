@@ -35,6 +35,9 @@ export interface AppConfig {
   sandboxWorkdir: string;
   sandboxDockerNetwork: string;
 
+  /** base64 32-byte key for connector-secret encryption at rest; derived from JWT_SECRET if unset (dev). */
+  secretsEncryptionKey: string;
+
   seedDemo: boolean;
   demoTenantName: string;
   demoAdminEmail: string;
@@ -74,6 +77,8 @@ const schema = Joi.object({
   SANDBOX_IMAGE: Joi.string().default('praxis/sandbox:local'),
   SANDBOX_WORKDIR: Joi.string().default('/workspace'),
   SANDBOX_DOCKER_NETWORK: Joi.string().default('bridge'),
+
+  SECRETS_ENCRYPTION_KEY: Joi.string().allow('').default(''),
 
   SEED_DEMO: Joi.boolean().truthy('true').falsy('false').default(true),
   DEMO_TENANT_NAME: Joi.string().default('Acme'),
@@ -116,6 +121,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     sandboxImage: value.SANDBOX_IMAGE,
     sandboxWorkdir: value.SANDBOX_WORKDIR,
     sandboxDockerNetwork: value.SANDBOX_DOCKER_NETWORK,
+    secretsEncryptionKey: value.SECRETS_ENCRYPTION_KEY,
     seedDemo: value.SEED_DEMO,
     demoTenantName: value.DEMO_TENANT_NAME,
     demoAdminEmail: value.DEMO_ADMIN_EMAIL,

@@ -7,7 +7,8 @@ import { ProjectEntity } from '../database/entities';
 export interface CreateProjectInput {
   name: string;
   slug?: string;
-  repoRef?: { provider: string; owner: string; name: string } | null;
+  repoRef?: { provider: string; owner: string; name: string; path?: string } | null;
+  vcsConnectorId?: string | null;
   baseBranch?: string;
   pathScope?: string | null;
   verifyPipeline?: Record<string, string>;

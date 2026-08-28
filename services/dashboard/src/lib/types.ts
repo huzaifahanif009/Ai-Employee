@@ -140,6 +140,30 @@ export interface ModelCall {
   createdAt: string;
 }
 
+export interface Connector {
+  id: string;
+  kind: "gitlab" | "github" | "bitbucket" | "generic-git";
+  name: string;
+  contracts: string[];
+  config: { baseUrl?: string; projectPath?: string | null };
+  authKind: string;
+  secretHint: string | null;
+  status: "healthy" | "degraded" | "down" | "unconfigured";
+  healthDetail: string | null;
+  lastHealthAt: string | null;
+  createdAt: string;
+  usedByProjects: { id: string; name: string }[];
+}
+
+export interface RepoRef {
+  id: string;
+  owner: string;
+  name: string;
+  url: string;
+  defaultBranch: string;
+  visibility: string;
+}
+
 export interface ToolCall {
   id: string;
   runId: string;

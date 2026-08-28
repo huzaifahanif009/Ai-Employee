@@ -6,6 +6,7 @@ import {
   CheckSquare,
   LayoutGrid,
   ListTodo,
+  Plug,
   Sparkles,
 } from "lucide-react";
 import Link from "next/link";
@@ -17,9 +18,10 @@ const NAV = [
   { href: "/runs", label: "Runs", icon: Activity },
   { href: "/approvals", label: "Approvals", icon: CheckSquare },
   { href: "/work-items", label: "Work Items", icon: ListTodo },
+  { href: "/integrations", label: "Integrations", icon: Plug },
 ];
 
-const SOON = ["Projects", "Agents & Policies", "Analytics", "Integrations", "Audit Log"];
+const SOON = ["Projects", "Agents & Policies", "Analytics", "System Health", "Audit Log"];
 
 export function Sidebar({ openApprovals }: { openApprovals: number }) {
   const pathname = usePathname();

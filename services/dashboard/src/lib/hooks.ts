@@ -5,10 +5,12 @@ import { api } from "./api";
 import type {
   Approval,
   ApprovalDecision,
+  Connector,
   ModelCall,
   ModelCatalogEntry,
   Page,
   Project,
+  RepoRef,
   Run,
   ToolCall,
   WorkItem,
@@ -24,6 +26,73 @@ const keys = {
 
 export function useProjects() {
   return useQuery({ queryKey: keys.projects, queryFn: () => api.get<Project[]>("/projects") });
+}
+
+// ---------- connectors ----------
+
+export function useConnectors() {
+  return useQuery({
+    queryKey: ["connectors"],
+    queryFn: () => api.get<Connector[]>("/connectors"),
+    refetchInterval: 15000,
+  });
+}
+
+export function useCreateConnector() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: {
+      kind: string;
+      name: string;
+      config: { baseUrl: string; projectPath?: string };
+      token: string;
+    }) => api.post<Connector>("/connectors", input),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["connectors"] }),
+  });
+}
+
+export function useTestConnector() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      api.post<{ status: string; detail: string }>(`/connectors/${id}/test`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["connectors"] }),
+  });
+}
+
+export function useDeleteConnector() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.del(`/connectors/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["connectors"] }),
+  });
+}
+
+export function useConnectorRepos(id: string | null) {
+  return useQuery({
+    queryKey: ["connectors", id, "repos"],
+    queryFn: () => api.get<RepoRef[]>(`/connectors/${id}/repos`),
+    enabled: !!id,
+  });
+}
+
+export function useBindProjectRepo() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: {
+      projectId: string;
+      vcsConnectorId: string;
+      repoRef: { provider: string; owner: string; name: string; path: string };
+    }) =>
+      api.patch<Project>(`/projects/${input.projectId}`, {
+        vcsConnectorId: input.vcsConnectorId,
+        repoRef: input.repoRef,
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["projects"] });
+      qc.invalidateQueries({ queryKey: ["connectors"] });
+    },
+  });
 }
 
 export function useWorkItems(projectId?: string) {

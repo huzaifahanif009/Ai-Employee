@@ -39,7 +39,10 @@ export class ProjectEntity {
   slug!: string;
 
   @Column({ type: 'jsonb', nullable: true })
-  repoRef!: { provider: string; owner: string; name: string } | null;
+  repoRef!: { provider: string; owner: string; name: string; path?: string } | null;
+
+  @Column({ type: 'uuid', nullable: true })
+  vcsConnectorId!: string | null;
 
   @Column({ default: 'main' })
   baseBranch!: string;
