@@ -1,0 +1,30 @@
+{
+  "name": "@praxis/orchestrator",
+  "version": "0.1.0",
+  "description": "Praxis Run orchestrator — Temporal worker (RunWorkflow + activities). ADR-0002.",
+  "license": "UNLICENSED",
+  "private": true,
+  "main": "dist/worker.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/worker.js",
+    "start:dev": "ts-node src/worker.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "clean": "rimraf dist"
+  },
+  "dependencies": {
+    "@praxis/contracts": "*",
+    "@praxis/event-schemas": "*",
+    "@temporalio/activity": "^1.11.1",
+    "@temporalio/client": "^1.11.1",
+    "@temporalio/worker": "^1.11.1",
+    "@temporalio/workflow": "^1.11.1",
+    "undici": "^6.19.8"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "rimraf": "^5.0.10",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.6.3"
+  }
+}

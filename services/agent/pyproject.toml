@@ -1,0 +1,32 @@
+[project]
+name = "praxis-agent"
+version = "0.1.0"
+description = "Praxis agent runtime (LangGraph graphs + tool executors). Phase 1 skeleton."
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "pydantic>=2.8",
+    "httpx>=0.27",
+    "structlog>=24.1",
+]
+
+[project.optional-dependencies]
+# Wired in Phase 3 — kept out of the base install so the skeleton is light.
+agent = [
+    "langgraph>=0.2",
+    "langchain-core>=0.3",
+    "tree-sitter>=0.21",
+]
+dev = ["pytest>=8", "ruff>=0.6", "mypy>=1.11"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.hatch.build.targets.wheel]
+packages = ["praxis_agent"]

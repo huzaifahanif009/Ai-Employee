@@ -1,0 +1,30 @@
+# LiteLLM proxy config (prd/07 / ADR-0003). The Model Router (in core) fronts this.
+# Local dev works with zero provider keys via the mock model below.
+
+model_list:
+  # Always-available stub — deterministic, no network, no keys.
+  - model_name: praxis-stub
+    litellm_params:
+      model: gpt-3.5-turbo
+      mock_response: "STUB: the Praxis model gateway is wired. Provide real provider keys in .env to route to OpenAI / Anthropic / Gemini."
+
+  # Uncomment once keys are set in .env:
+  # - model_name: strong
+  #   litellm_params:
+  #     model: anthropic/claude-3-5-sonnet-latest
+  #     api_key: os.environ/ANTHROPIC_API_KEY
+  # - model_name: fast
+  #   litellm_params:
+  #     model: openai/gpt-4o-mini
+  #     api_key: os.environ/OPENAI_API_KEY
+  # - model_name: gemini
+  #   litellm_params:
+  #     model: gemini/gemini-1.5-pro
+  #     api_key: os.environ/GEMINI_API_KEY
+
+litellm_settings:
+  drop_params: true
+  request_timeout: 120
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY

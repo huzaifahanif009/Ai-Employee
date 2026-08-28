@@ -1,0 +1,38 @@
+# deps
+node_modules/
+.venv/
+__pycache__/
+*.egg-info/
+
+# build
+dist/
+build/
+*.tsbuildinfo
+coverage/
+.nyc_output/
+
+# env & secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# tooling
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.log
+
+# data volumes (compose bind mounts, if any)
+/.data/
+
+# generated
+packages/event-schemas/src/generated/
+services/*/src/**/generated/
+
+# never track compiled output that lands next to sources
+packages/*/src/**/*.js
+packages/*/src/**/*.d.ts
+packages/*/src/**/*.js.map

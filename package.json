@@ -1,0 +1,28 @@
+{
+  "name": "praxis",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Praxis — AI execution platform (monorepo root)",
+  "workspaces": [
+    "packages/*",
+    "services/core",
+    "services/orchestrator"
+  ],
+  "engines": {
+    "node": ">=20.11.0"
+  },
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "build:contracts": "npm run -w @praxis/contracts build && npm run -w @praxis/event-schemas build",
+    "core:dev": "npm run -w @praxis/core start:dev",
+    "orchestrator:dev": "npm run -w @praxis/orchestrator start:dev"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "prettier": "^3.3.3",
+    "typescript": "^5.6.3"
+  }
+}

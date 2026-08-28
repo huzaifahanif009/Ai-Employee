@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://praxis.dev/schemas/event-envelope.json",
+  "title": "PlatformEvent envelope",
+  "type": "object",
+  "required": ["id", "type", "schemaVersion", "tenantId", "ts", "payload"],
+  "properties": {
+    "id": { "type": "string" },
+    "type": { "type": "string" },
+    "schemaVersion": { "type": "integer", "minimum": 1 },
+    "tenantId": { "type": "string", "format": "uuid" },
+    "runId": { "type": "string", "format": "uuid" },
+    "stepId": { "type": "string", "format": "uuid" },
+    "traceId": { "type": "string" },
+    "seq": { "type": "integer", "minimum": 0 },
+    "ts": { "type": "string", "format": "date-time" },
+    "actor": {
+      "type": "object",
+      "required": ["kind", "id"],
+      "properties": {
+        "kind": { "enum": ["user", "service", "agent", "system"] },
+        "id": { "type": "string" },
+        "display": { "type": "string" }
+      }
+    },
+    "payload": { "type": "object" }
+  },
+  "additionalProperties": false
+}

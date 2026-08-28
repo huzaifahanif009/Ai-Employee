@@ -1,0 +1,15 @@
+**/node_modules
+**/dist
+**/.venv
+**/__pycache__
+**/coverage
+.git
+.env
+.env.*
+!.env.example
+prd
+docs
+*.md
+**/*.spec.ts
+**/*.test.ts
+services/dashboard/node_modules

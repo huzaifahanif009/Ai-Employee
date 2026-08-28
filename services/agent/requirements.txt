@@ -1,0 +1,6 @@
+# Phase 1 skeleton runtime deps (pinned loosely). `pip install -r requirements.txt`.
+fastapi>=0.115,<1
+uvicorn[standard]>=0.30,<1
+pydantic>=2.8,<3
+httpx>=0.27,<1
+structlog>=24.1

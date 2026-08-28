@@ -1,0 +1,20 @@
+{
+  "name": "@praxis/contracts",
+  "version": "0.1.0",
+  "description": "Praxis provider / connector / tool / agent interfaces. No implementations.",
+  "license": "UNLICENSED",
+  "private": true,
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "clean": "rimraf dist",
+    "test": "node --test dist/**/*.test.js || true"
+  },
+  "devDependencies": {
+    "rimraf": "^5.0.10",
+    "typescript": "^5.6.3"
+  }
+}

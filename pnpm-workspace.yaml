@@ -1,0 +1,7 @@
+# pnpm is the documented target package manager (see ADR-0011).
+# This machine runs npm workspaces; keep both in sync.
+packages:
+  - "packages/*"
+  - "services/core"
+  - "services/orchestrator"
+  - "services/dashboard"
