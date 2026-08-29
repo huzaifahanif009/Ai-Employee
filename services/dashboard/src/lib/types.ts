@@ -183,6 +183,54 @@ export interface ToolCall {
   createdAt: string;
 }
 
+export type AiProviderKind =
+  | "openai"
+  | "anthropic"
+  | "google"
+  | "openai-compatible"
+  | "azure-openai";
+
+export interface AiProviderKey {
+  id: string;
+  providerId: string;
+  label: string;
+  last4: string;
+  enabled: boolean;
+  isDefault: boolean;
+  status: "untested" | "valid" | "invalid" | "error";
+  lastTestDetail: string | null;
+  lastTestedAt: string | null;
+  createdAt: string;
+}
+
+export interface AiModel {
+  id: string;
+  providerId: string;
+  alias: string;
+  providerModel: string;
+  routingClasses: string[];
+  capabilities: string[];
+  contextWindow: number;
+  maxOutput: number;
+  priceInputPerMTok: string;
+  priceOutputPerMTok: string;
+  enabled: boolean;
+  isDefault: boolean;
+}
+
+export interface AiProvider {
+  id: string;
+  kind: AiProviderKind;
+  name: string;
+  baseUrl: string | null;
+  config: Record<string, unknown>;
+  enabled: boolean;
+  isDefault: boolean;
+  createdAt: string;
+  keys: AiProviderKey[];
+  models: AiModel[];
+}
+
 export interface ModelCatalogEntry {
   alias: string;
   provider: string;

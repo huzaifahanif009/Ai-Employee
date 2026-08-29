@@ -3,6 +3,7 @@
 import {
   Activity,
   Boxes,
+  BrainCircuit,
   CheckSquare,
   LayoutGrid,
   ListTodo,
@@ -19,6 +20,7 @@ const NAV = [
   { href: "/approvals", label: "Approvals", icon: CheckSquare },
   { href: "/work-items", label: "Work Items", icon: ListTodo },
   { href: "/integrations", label: "Integrations", icon: Plug },
+  { href: "/ai", label: "AI Providers", icon: BrainCircuit },
 ];
 
 const SOON = ["Projects", "Agents & Policies", "Analytics", "System Health", "Audit Log"];

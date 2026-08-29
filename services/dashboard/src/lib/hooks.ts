@@ -3,11 +3,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "./api";
 import type {
+  AiModel,
+  AiProvider,
+  AiProviderKey,
   Approval,
   ApprovalDecision,
   Connector,
   ModelCall,
-  ModelCatalogEntry,
   Page,
   Project,
   RepoRef,
@@ -155,9 +157,73 @@ export function useRunToolCalls(runId: string | null, live: boolean) {
 
 export function useModelCatalog() {
   return useQuery({
-    queryKey: ["model-catalog"],
-    queryFn: () => api.get<ModelCatalogEntry[]>("/model/catalog"),
-    staleTime: 60_000,
+    queryKey: ["ai", "models"],
+    queryFn: () => api.get<AiModel[]>("/ai/models"),
+    staleTime: 30_000,
+  });
+}
+
+// ---------- AI providers / keys / models ----------
+
+const AI_KEY = ["ai", "providers"] as const;
+
+export function useAiProviders() {
+  return useQuery({ queryKey: AI_KEY, queryFn: () => api.get<AiProvider[]>("/ai/providers") });
+}
+export function useProviderKinds() {
+  return useQuery({ queryKey: ["ai", "kinds"], queryFn: () => api.get<string[]>("/ai/provider-kinds"), staleTime: 300_000 });
+}
+
+function aiMutation<TArgs, TRes>(fn: (a: TArgs) => Promise<TRes>) {
+  return function useAiMut() {
+    const qc = useQueryClient();
+    return useMutation<TRes, Error, TArgs>({
+      mutationFn: fn,
+      onSuccess: () => {
+        qc.invalidateQueries({ queryKey: ["ai"] });
+      },
+    });
+  };
+}
+
+export const useCreateProvider = aiMutation((i: {
+  kind: string;
+  name: string;
+  baseUrl?: string;
+  config?: Record<string, unknown>;
+}) => api.post<AiProvider>("/ai/providers", i));
+
+export const useUpdateProvider = aiMutation((i: { id: string; patch: Record<string, unknown> }) =>
+  api.patch<AiProvider>(`/ai/providers/${i.id}`, i.patch),
+);
+export const useDeleteProvider = aiMutation((id: string) => api.del(`/ai/providers/${id}`));
+export const useSeedModels = aiMutation((id: string) => api.post(`/ai/providers/${id}/seed-models`));
+
+export const useAddKey = aiMutation((i: {
+  providerId: string;
+  label: string;
+  apiKey: string;
+  isDefault?: boolean;
+}) => api.post<AiProviderKey>(`/ai/providers/${i.providerId}/keys`, i));
+export const useUpdateKey = aiMutation((i: { id: string; patch: Record<string, unknown> }) =>
+  api.patch<AiProviderKey>(`/ai/keys/${i.id}`, i.patch),
+);
+export const useDeleteKey = aiMutation((id: string) => api.del(`/ai/keys/${id}`));
+export const useTestKey = aiMutation((id: string) =>
+  api.post<{ status: string; detail: string }>(`/ai/keys/${id}/test`),
+);
+
+export const useCreateModel = aiMutation((i: Record<string, unknown>) => api.post<AiModel>("/ai/models", i));
+export const useUpdateModel = aiMutation((i: { id: string; patch: Record<string, unknown> }) =>
+  api.patch<AiModel>(`/ai/models/${i.id}`, i.patch),
+);
+export const useDeleteModel = aiMutation((id: string) => api.del(`/ai/models/${id}`));
+
+export function useDiscoverModels(providerId: string | null) {
+  return useQuery({
+    queryKey: ["ai", "discover", providerId],
+    queryFn: () => api.get<string[]>(`/ai/providers/${providerId}/discover-models`),
+    enabled: !!providerId,
   });
 }
 

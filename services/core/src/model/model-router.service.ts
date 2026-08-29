@@ -12,12 +12,13 @@ import type {
 } from "@praxis/contracts";
 import Redis from "ioredis";
 import { Repository } from "typeorm";
+import { AiRegistryService, ResolvedModel } from "../ai/ai-registry.service";
+import { clientForKind } from "../ai/provider-clients";
 import { ApprovalGateService } from "../approvals/approval-gate.service";
 import { AppConfig, CONFIG } from "../config/config";
 import { ModelCallEntity, RunEntity } from "../database/entities";
 import { RunEventsService } from "../events/run-events.service";
 import { checkBudget, estimateCostUsd, estimateTokens } from "./budget";
-import { activateFromEnv, byAlias, MODEL_CATALOG, resolveModel } from "./model-catalog";
 import { redactMessages } from "./redaction";
 
 interface OpenAIChatResponse {
@@ -29,7 +30,8 @@ interface OpenAIChatResponse {
   model?: string;
 }
 
-const RETRYABLE = new Set([408, 409, 425, 429, 500, 502, 503, 504]);
+/** Synthetic zero-cost fallback model — always available via the LiteLLM mock. */
+const STUB = { model: "praxis-stub", maxOutput: 4000 };
 
 @Injectable()
 export class ModelRouterService implements ModelRouter {
@@ -42,42 +44,30 @@ export class ModelRouterService implements ModelRouter {
     @InjectRepository(RunEntity) private readonly runs: Repository<RunEntity>,
     private readonly events: RunEventsService,
     private readonly gate: ApprovalGateService,
+    private readonly ai: AiRegistryService,
   ) {
-    activateFromEnv(process.env);
     this.redis = new Redis(cfg.redisUrl, { maxRetriesPerRequest: null, lazyConnect: false });
   }
 
+  /** legacy — the real per-tenant catalog is GET /ai/models */
   catalog(): Promise<ModelCatalogEntry[]> {
-    return Promise.resolve(MODEL_CATALOG);
+    return Promise.resolve([]);
   }
 
   async healthCheck() {
     const started = Date.now();
     try {
-      const r = await fetch(`${this.cfg.litellmBaseUrl}/health/liveliness`, {
-        signal: AbortSignal.timeout(3000),
-      });
-      return {
-        status: r.ok ? ("healthy" as const) : ("degraded" as const),
-        checkedAt: new Date().toISOString(),
-        latencyMs: Date.now() - started,
-      };
+      const r = await fetch(`${this.cfg.litellmBaseUrl}/health/liveliness`, { signal: AbortSignal.timeout(3000) });
+      return { status: r.ok ? ("healthy" as const) : ("degraded" as const), checkedAt: new Date().toISOString(), latencyMs: Date.now() - started };
     } catch (e) {
-      return {
-        status: "down" as const,
-        checkedAt: new Date().toISOString(),
-        detail: (e as Error).message,
-      };
+      return { status: "down" as const, checkedAt: new Date().toISOString(), detail: (e as Error).message };
     }
   }
 
   async *stream(req: ModelRequest): AsyncIterable<NormalizedStreamEvent> {
-    // Phase 2 slice: no true token streaming yet — run the call and emit the result in parts.
     const res = await this.complete(req);
     const text = res.content.map((p) => ("text" in p ? p.text : "")).join("");
-    for (let i = 0; i < text.length; i += 120) {
-      yield { type: "message.delta", text: text.slice(i, i + 120) };
-    }
+    for (let i = 0; i < text.length; i += 120) yield { type: "message.delta", text: text.slice(i, i + 120) };
     yield { type: "usage", usage: res.usage };
     yield { type: "done", response: res };
   }
@@ -87,23 +77,35 @@ export class ModelRouterService implements ModelRouter {
       throw new PraxisError("VALIDATION", "model request is missing attribution", 400);
     }
     const t0 = Date.now();
-    const primary = resolveModel(req);
+    const tenantId = req.attribution.tenantId;
 
-    // --- redact ---
+    // resolve a tenant-configured model (DB) — null = fall back to the stub
+    const resolved = await this.ai
+      .resolve(tenantId, { modelHint: req.modelHint, routingClass: req.routingClass, purpose: req.purpose })
+      .catch((e) => {
+        this.log.warn(`resolve: ${(e as Error).message}`);
+        return null;
+      });
+
+    // redact: known secret patterns + every configured provider key for this tenant
+    const providerSecrets = await this.ai.allActiveSecrets(tenantId).catch(() => []);
     const { messages: redacted, redacted: redactedSpans } = redactMessages(
       req.messages.map((m) => ({
         role: m.role,
-        content:
-          typeof m.content === "string"
-            ? m.content
-            : m.content.map((p) => ("text" in p ? p.text : "")).join("\n"),
+        content: typeof m.content === "string" ? m.content : m.content.map((p) => ("text" in p ? p.text : "")).join("\n"),
       })),
+      providerSecrets,
     );
 
-    // --- exact cache ---
+    const modelTag = resolved ? `${resolved.providerKind}:${resolved.providerModel}` : "stub";
+    const priceIn = resolved?.priceInputPerMTok ?? 0;
+    const priceOut = resolved?.priceOutputPerMTok ?? 0;
+    const maxOut = req.maxOutputTokens ?? resolved?.maxOutput ?? 2048;
+
+    // exact cache
     const cacheKey =
       req.cache?.mode === "exact"
-        ? `praxis:mcache:${sha(primary.model + JSON.stringify(redacted) + (req.temperature ?? "") + (req.responseFormat ?? ""))}`
+        ? `praxis:mcache:${sha(modelTag + JSON.stringify(redacted) + (req.temperature ?? "") + (req.responseFormat ?? ""))}`
         : null;
     if (cacheKey) {
       const hit = await this.redis.get(cacheKey).catch(() => null);
@@ -111,126 +113,139 @@ export class ModelRouterService implements ModelRouter {
         const cached = JSON.parse(hit) as ModelResponse;
         cached.usage.costUsd = 0;
         cached.routing = { attempts: [], cacheHit: "exact" };
-        await this.record(req, cached, 0, redactedSpans, "exact", []);
+        await this.record(req, cached, redactedSpans, "exact", []);
         return cached;
       }
     }
 
-    // --- budget ---
+    // budget
     const inputTokens = redacted.reduce((s, m) => s + estimateTokens(String(m.content)), 0);
-    const estCost = estimateCostUsd(
-      inputTokens,
-      req.maxOutputTokens ?? primary.maxOutput,
-      primary.priceInputPerMTok,
-      primary.priceOutputPerMTok,
-    );
-    if (req.attribution.runId) {
-      await this.enforceBudget(req, estCost, inputTokens);
-    }
-
-    // --- call, with fallback chain ---
-    const chain = [primary, ...(primary.fallbacks ?? []).map(byAlias).filter(Boolean) as ModelCatalogEntry[]];
-    const attempts: RouteAttempt[] = [];
-    let lastErr: unknown;
+    const estCost = estimateCostUsd(inputTokens, maxOut, priceIn, priceOut);
+    if (req.attribution.runId) await this.enforceBudget(req, estCost, inputTokens);
 
     if (req.attribution.runId) {
       await this.events.append({
-        tenantId: req.attribution.tenantId,
+        tenantId,
         runId: req.attribution.runId,
         type: "model_call.started",
-        payload: { purpose: req.purpose, routingClass: req.routingClass, model: primary.alias },
+        payload: { purpose: req.purpose, routingClass: req.routingClass, model: resolved?.alias ?? "stub" },
       });
     }
 
-    for (let i = 0; i < chain.length; i++) {
-      const entry = chain[i];
-      const attemptStart = Date.now();
+    const attempts: RouteAttempt[] = [];
+
+    // 1) configured provider (direct)
+    if (resolved) {
+      const started = Date.now();
       try {
-        const raw = await this.callLiteLLM(entry, redacted, req);
-        const usage = raw.usage ?? {};
-        const inTok = usage.prompt_tokens ?? inputTokens;
-        const outTok = usage.completion_tokens ?? 0;
-        const cachedTok = usage.prompt_tokens_details?.cached_tokens ?? 0;
-        const costUsd = +(
-          ((inTok - cachedTok) / 1_000_000) * entry.priceInputPerMTok +
-          (outTok / 1_000_000) * entry.priceOutputPerMTok
-        ).toFixed(6);
-
-        attempts.push({
-          provider: entry.provider,
-          model: entry.model,
-          attempt: i + 1,
-          outcome: "ok",
-          latencyMs: Date.now() - attemptStart,
-        });
-
-        const response: ModelResponse = {
-          model: raw.model ?? entry.model,
-          provider: entry.provider,
-          content: [{ type: "text", text: raw.choices?.[0]?.message?.content ?? "" }],
-          toolCalls: raw.choices?.[0]?.message?.tool_calls?.map((tc) => ({
-            id: tc.id,
-            name: tc.function.name,
-            arguments: safeJson(tc.function.arguments),
-          })),
-          finishReason: (raw.choices?.[0]?.finish_reason as ModelResponse["finishReason"]) ?? "stop",
-          usage: {
-            inputTokens: inTok,
-            outputTokens: outTok,
-            cachedInputTokens: cachedTok,
-            costUsd,
-          },
-          routing: { attempts, cacheHit: null },
-          latencyMs: Date.now() - t0,
-        };
-
-        if (cacheKey) {
-          await this.redis
-            .set(cacheKey, JSON.stringify(response), "EX", req.cache?.ttlSeconds ?? 900)
-            .catch(() => undefined);
-        }
-        await this.record(req, response, redactedSpans, redactedSpans, "none", attempts);
+        const response = await this.callDirect(resolved, redacted, req, maxOut, priceIn, priceOut, t0);
+        attempts.push({ provider: resolved.providerKind, model: resolved.providerModel, attempt: 1, outcome: "ok", latencyMs: Date.now() - started });
+        response.routing = { attempts, cacheHit: null };
+        if (cacheKey) await this.redis.set(cacheKey, JSON.stringify(response), "EX", req.cache?.ttlSeconds ?? 900).catch(() => undefined);
+        await this.record(req, response, redactedSpans, "none", attempts);
         return response;
       } catch (err) {
-        lastErr = err;
-        const status = err instanceof HttpErr ? err.status : 0;
+        const status = (err as { status?: number }).status ?? 0;
         attempts.push({
-          provider: entry.provider,
-          model: entry.model,
-          attempt: i + 1,
-          outcome: RETRYABLE.has(status) || status === 0 ? "retryable_error" : "fatal_error",
+          provider: resolved.providerKind,
+          model: resolved.providerModel,
+          attempt: 1,
+          outcome: status >= 400 && status < 500 && status !== 429 ? "fatal_error" : "retryable_error",
           reason: (err as Error).message,
-          latencyMs: Date.now() - attemptStart,
+          latencyMs: Date.now() - started,
         });
-        if (status && !RETRYABLE.has(status)) break;
-        if (req.attribution.runId && i < chain.length - 1) {
+        if (req.attribution.runId) {
           await this.events.append({
-            tenantId: req.attribution.tenantId,
+            tenantId,
             runId: req.attribution.runId,
             type: "model_call.fallback",
-            payload: { fromModel: entry.model, toModel: chain[i + 1]?.model, reason: (err as Error).message },
+            payload: { fromModel: resolved.providerModel, toModel: STUB.model, reason: (err as Error).message },
           });
         }
       }
     }
 
-    throw new PraxisError(
-      "PROVIDER_UNAVAILABLE",
-      `all model routes failed: ${(lastErr as Error)?.message ?? "unknown"}`,
-      503,
-      { attempts },
-    );
+    // 2) stub via LiteLLM
+    const started = Date.now();
+    try {
+      const raw = await this.callLiteLLM(STUB, redacted, req);
+      const response = this.fromOpenAI(raw, "litellm", STUB.model, 0, t0);
+      attempts.push({ provider: "litellm", model: STUB.model, attempt: attempts.length + 1, outcome: "ok", latencyMs: Date.now() - started });
+      response.routing = { attempts, cacheHit: null };
+      await this.record(req, response, redactedSpans, "none", attempts);
+      return response;
+    } catch (err) {
+      attempts.push({ provider: "litellm", model: STUB.model, attempt: attempts.length + 1, outcome: "fatal_error", reason: (err as Error).message, latencyMs: Date.now() - started });
+      throw new PraxisError("PROVIDER_UNAVAILABLE", `all model routes failed: ${(err as Error).message}`, 503, { attempts });
+    }
   }
 
   // ---------------------------------------------------------------------------
 
+  private async callDirect(
+    resolved: ResolvedModel,
+    messages: { role: string; content: string }[],
+    req: ModelRequest,
+    maxOut: number,
+    priceIn: number,
+    priceOut: number,
+    t0: number,
+  ): Promise<ModelResponse> {
+    const r = await clientForKind(resolved.providerKind).chat({
+      baseUrl: resolved.baseUrl,
+      apiKey: resolved.apiKey,
+      model: resolved.providerModel,
+      config: resolved.config,
+      messages,
+      temperature: req.temperature,
+      maxOutputTokens: maxOut,
+      responseFormat: req.responseFormat === "json" ? "json" : "text",
+      timeoutMs: req.timeoutMs ?? 60_000,
+    });
+    const costUsd = +(
+      ((r.usage.inputTokens - r.usage.cachedInputTokens) / 1_000_000) * priceIn +
+      (r.usage.outputTokens / 1_000_000) * priceOut
+    ).toFixed(6);
+    return {
+      model: r.model,
+      provider: resolved.providerKind,
+      content: [{ type: "text", text: r.text }],
+      toolCalls: r.toolCalls,
+      finishReason: (r.finishReason as ModelResponse["finishReason"]) ?? "stop",
+      usage: {
+        inputTokens: r.usage.inputTokens,
+        outputTokens: r.usage.outputTokens,
+        cachedInputTokens: r.usage.cachedInputTokens,
+        costUsd,
+      },
+      routing: { attempts: [], cacheHit: null },
+      latencyMs: Date.now() - t0,
+    };
+  }
+
+  private fromOpenAI(raw: OpenAIChatResponse, provider: string, model: string, costUsd: number, t0: number): ModelResponse {
+    const usage = raw.usage ?? {};
+    return {
+      model: raw.model ?? model,
+      provider,
+      content: [{ type: "text", text: raw.choices?.[0]?.message?.content ?? "" }],
+      toolCalls: raw.choices?.[0]?.message?.tool_calls?.map((tc) => ({ id: tc.id, name: tc.function.name, arguments: safeJson(tc.function.arguments) })),
+      finishReason: (raw.choices?.[0]?.finish_reason as ModelResponse["finishReason"]) ?? "stop",
+      usage: {
+        inputTokens: usage.prompt_tokens ?? 0,
+        outputTokens: usage.completion_tokens ?? 0,
+        cachedInputTokens: usage.prompt_tokens_details?.cached_tokens ?? 0,
+        costUsd,
+      },
+      routing: { attempts: [], cacheHit: null },
+      latencyMs: Date.now() - t0,
+    };
+  }
+
   private async enforceBudget(req: ModelRequest, estCost: number, estTokens: number) {
     const run = await this.runs.findOne({ where: { id: req.attribution.runId } });
     if (!run) return;
-    const limits = {
-      usd: Number(run.budgetSnapshot?.usd) || undefined,
-      tokens: Number(run.budgetSnapshot?.tokens) || undefined,
-    };
+    const limits = { usd: Number(run.budgetSnapshot?.usd) || undefined, tokens: Number(run.budgetSnapshot?.tokens) || undefined };
     const check = checkBudget(limits, run.totals, { costUsd: estCost, tokens: estTokens });
     if (check.verdict === "ok") return;
 
@@ -243,8 +258,6 @@ export class ModelRouterService implements ModelRouter {
       });
       throw budgetExceeded({ runId: run.id, ...check });
     }
-
-    // soft → HITL gate (prd/06 §5 budget row)
     if ((req.budgetPolicy?.onSoftLimit ?? "raiseApproval") === "continue") return;
     await this.events.append({
       tenantId: req.attribution.tenantId,
@@ -257,28 +270,16 @@ export class ModelRouterService implements ModelRouter {
       runId: run.id,
       runStepId: req.attribution.stepId,
       type: "budget",
-      evidence: {
-        summary: `Run spend ${fmt(run.totals.costUsd)} of ${fmt(check.limitUsd ?? 0)} — next call ≈ ${fmt(estCost)}. Continue?`,
-        reason: check.reason,
-      },
+      evidence: { summary: `Run spend ${fmt(run.totals.costUsd)} of ${fmt(check.limitUsd ?? 0)} — next call ≈ ${fmt(estCost)}. Continue?`, reason: check.reason },
       actionPreview: { action: "continue_within_budget", projectedUsd: check.projectedUsd },
     });
-    if (decision.decision === "reject") {
-      throw budgetExceeded({ runId: run.id, reason: "operator declined budget extension", ...check });
-    }
+    if (decision.decision === "reject") throw budgetExceeded({ runId: run.id, reason: "operator declined budget extension", ...check });
   }
 
-  private async callLiteLLM(
-    entry: ModelCatalogEntry,
-    messages: { role: string; content: string }[],
-    req: ModelRequest,
-  ): Promise<OpenAIChatResponse> {
+  private async callLiteLLM(entry: { model: string; maxOutput: number }, messages: { role: string; content: string }[], req: ModelRequest): Promise<OpenAIChatResponse> {
     const res = await fetch(`${this.cfg.litellmBaseUrl}/chat/completions`, {
       method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${this.cfg.litellmMasterKey}`,
-      },
+      headers: { "content-type": "application/json", authorization: `Bearer ${this.cfg.litellmMasterKey}` },
       body: JSON.stringify({
         model: entry.model,
         messages,
@@ -289,7 +290,9 @@ export class ModelRouterService implements ModelRouter {
       signal: AbortSignal.timeout(req.timeoutMs ?? 60_000),
     });
     if (!res.ok) {
-      throw new HttpErr(res.status, `${res.status} ${await res.text().catch(() => res.statusText)}`);
+      const e = new Error(`${res.status} ${await res.text().catch(() => res.statusText)}`) as Error & { status: number };
+      e.status = res.status;
+      throw e;
     }
     return (await res.json()) as OpenAIChatResponse;
   }
@@ -298,7 +301,6 @@ export class ModelRouterService implements ModelRouter {
     req: ModelRequest,
     res: ModelResponse,
     redactedSpans: number,
-    _r2: number,
     cacheHit: "none" | "exact" | "semantic",
     attempts: RouteAttempt[],
   ) {
@@ -343,16 +345,7 @@ export class ModelRouterService implements ModelRouter {
   }
 
   async ledgerForRun(tenantId: string, runId: string) {
-    return this.ledger.find({
-      where: { tenantId, runId },
-      order: { createdAt: "ASC" },
-    });
-  }
-}
-
-class HttpErr extends Error {
-  constructor(public status: number, message: string) {
-    super(message);
+    return this.ledger.find({ where: { tenantId, runId }, order: { createdAt: "ASC" } });
   }
 }
 

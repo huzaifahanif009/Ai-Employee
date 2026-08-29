@@ -10,6 +10,9 @@ export * from './audit-log.entity';
 export * from './model-call.entity';
 export * from './tool-call.entity';
 export * from './connector.entity';
+export * from './ai-provider.entity';
+export * from './ai-provider-key.entity';
+export * from './ai-model.entity';
 
 import { TenantEntity } from './tenant.entity';
 import { UserEntity } from './user.entity';
@@ -23,6 +26,9 @@ import { AuditLogEntity } from './audit-log.entity';
 import { ModelCallEntity } from './model-call.entity';
 import { ToolCallEntity } from './tool-call.entity';
 import { ConnectorEntity } from './connector.entity';
+import { AiProviderEntity } from './ai-provider.entity';
+import { AiProviderKeyEntity } from './ai-provider-key.entity';
+import { AiModelEntity } from './ai-model.entity';
 
 export const ALL_ENTITIES = [
   TenantEntity,
@@ -37,4 +43,7 @@ export const ALL_ENTITIES = [
   ModelCallEntity,
   ToolCallEntity,
   ConnectorEntity,
+  AiProviderEntity,
+  AiProviderKeyEntity,
+  AiModelEntity,
 ];

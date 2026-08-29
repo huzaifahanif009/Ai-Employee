@@ -13,6 +13,7 @@ export type Capability =
   | 'agent:promote'
   | 'policy:write'
   | 'connector:write'
+  | 'provider:write'
   | 'member:write'
   | 'tenant:admin';
 
@@ -20,12 +21,12 @@ const MATRIX: Record<Role, Capability[]> = {
   owner: [
     'dashboard:read', 'run:start', 'run:control', 'approval:decide', 'approval:override',
     'project:write', 'agent:write', 'agent:promote', 'policy:write', 'connector:write',
-    'member:write', 'tenant:admin',
+    'provider:write', 'member:write', 'tenant:admin',
   ],
   admin: [
     'dashboard:read', 'run:start', 'run:control', 'approval:decide', 'approval:override',
     'project:write', 'agent:write', 'agent:promote', 'policy:write', 'connector:write',
-    'member:write',
+    'provider:write', 'member:write',
   ],
   maintainer: [
     'dashboard:read', 'run:start', 'run:control', 'approval:decide', 'approval:override',
