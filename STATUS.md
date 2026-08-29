@@ -20,6 +20,16 @@
 | **HITL / Approvals** (new): plan-approval gate blocks a Run, `reject` with no note → 400, `approve` resumes the run to `succeeded`, `reject` (with note) fails it as `plan_rejected` with the note surfaced as the failure message | ✅ all four paths verified live via the API |
 | Dashboard (`:8080`) served through nginx, proxies `/api/*` including SSE | ✅ 200, login round-trips to core |
 
+## Verified on this machine (2026-08-29) — real LLM wired (Gemini)
+
+| Check | Result |
+|-------|--------|
+| Add a Google/Gemini API key via `POST /ai/providers/:id/keys` (encrypting endpoint) | ✅ stored AES-256-GCM, API returns only `••••0NPQ` + `status:valid` ("50 models visible") |
+| Model Router resolves the tenant's Google model + key and calls Gemini directly | ✅ `provider:"google"`, real token usage + cost |
+| Full run — all 6 model calls (triage / plan / code×3 / review) | ✅ 6/6 on `google/gemini-3.6-flash`, run `succeeded`, real MR !9 opened on the calculator repo |
+| Retired model names (`gemini-1.5-*`, `gemini-2.5-*`) | ⚠️ 404 for new users → Model Router emits `model_call.fallback` → stub; fixed by pointing models at `gemini-3.6-flash` |
+| `gemini-3.1-pro-preview` on a free-tier key | ⚠️ 429 (needs a billed Google project) — `long-context` alias also points at flash for now |
+
 ## Verified on this machine (2026-08-29) — Dashboard redesign + Architecture screen
 
 | Check | Result |
