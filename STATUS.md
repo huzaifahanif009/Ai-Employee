@@ -20,6 +20,18 @@
 | **HITL / Approvals** (new): plan-approval gate blocks a Run, `reject` with no note → 400, `approve` resumes the run to `succeeded`, `reject` (with note) fails it as `plan_rejected` with the note surfaced as the failure message | ✅ all four paths verified live via the API |
 | Dashboard (`:8080`) served through nginx, proxies `/api/*` including SSE | ✅ 200, login round-trips to core |
 
+## Verified on this machine (2026-08-29) — real coder agent
+
+| Check | Result |
+|-------|--------|
+| `npm test` (core, 12 suites incl. new `coder-agent.service.spec.ts` — 12 cases) | ✅ 84/84 |
+| Greenfield work item "Build calculator UI and input handling" → real plan | ✅ 5 concrete steps (`index.html`, `style.css`, `src/calculator.js`, `src/app.js`, `tests/calculator.test.js`) |
+| Plan gate is editable — `POST /approvals/:id/decision { payload: { editedPlan } }` → run follows edited steps | ✅ wired end-to-end (dashboard ApprovalCard step editor) |
+| Execute writes **real file contents** from the model through the path-guarded Tool Broker | ✅ 4 files, ~17 KB of working HTML/CSS/JS committed |
+| Deliver — commit message + PR body from plan summary / files / verify / review | ✅ real MR !11 opened on the calculator repo |
+| Empty diff → run fails; no more `PRAXIS_NOTES.md` stub, no FIXTURE repo, no eventing-only path | ✅ |
+| Known rough edges (flash model): review JSON sometimes empty → defaults to `warn`; greenfield JS w/o package.json skips tests | ⚠️ acceptable — pipeline is correct, output quality tracks the model |
+
 ## Verified on this machine (2026-08-29) — real LLM wired (Gemini)
 
 | Check | Result |
@@ -166,14 +178,18 @@ services/core/  (NestJS)   config (Joi-validated, fail-fast) · health · auth (
                           path guard (no traversal / .git / CI config); `approve` tier → HITL
                           gate; `git.push` = forbidden until a VCS connector exists.
                           `GET /tools/catalog`, `/runs/:id/tool-calls` ·
-                          InprocRunDriver (DEMO advancer; now does **real work** — provisions a
-                          container; if the project has a bound VCS connector it **clones the
-                          real repo, makes a small safe change, pushes the branch and opens a
-                          real MR/PR** (token redacted from all logs/events); otherwise it
-                          materialises a fixture repo + runs real `node --test`. 6 metered model
-                          calls + ~12 real tool calls per run, real commit + unified diff,
-                          sandbox torn down. The *advancement* is replaced by the orchestrator in
-                          P2; the gates, model calls, tool calls and VCS delivery are not.)
+                          InprocRunDriver + **CoderAgentService** (the run "brain", infra-free →
+                          unit-tested): provisions a container, **clones the bound repo**, then
+                          `analyzeRepo` (stack / test cmd / greenfield) → `plan` (one strong model
+                          call → concrete JSON steps) → **editable plan gate** → `implementStep`
+                          per step (model returns the COMPLETE new file contents → written via the
+                          path-guarded Tool Broker) → `verify` (detect + run the test command,
+                          one repair round) → `review` (verdict + findings on the real staged
+                          diff; empty diff fails the run) → **commit + push + open PR/MR** with a
+                          body built from the plan summary / files / verify / review, + tracker
+                          write-back. No FIXTURE, no eventing-only path. Token redacted everywhere.
+                          The *advancement* is replaced by the orchestrator in P2; the agent,
+                          gates, model/tool calls and VCS delivery are not.
 services/orchestrator/     Temporal RunWorkflow (deterministic step sequence, HITL signal gates,
   (skeleton, TS)           pause/resume/cancel) + activities + worker + client helper.
                           Not started by default (RUN_DRIVER=inproc). Wire in Phase 2.
