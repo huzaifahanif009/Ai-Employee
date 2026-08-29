@@ -13,7 +13,8 @@ import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { authErrorMessage } from "@/lib/auth";
 import { deriveDelivery, derivePlan, deriveReview, deriveSteps, deriveVerification } from "@/lib/derive";
-import { useApprovals, useRun, useRunControl, useRunModelCalls, useRunToolCalls } from "@/lib/hooks";
+import { useApprovals, useRun, useRunModelCalls, useRunToolCalls } from "@/lib/hooks";
+import { useRunControlChannel } from "@/lib/control-socket";
 import { useRunStream } from "@/lib/sse";
 import { formatTokens, formatUsd, shortId } from "@/lib/utils";
 
@@ -24,7 +25,7 @@ export default function RunDetailPage() {
   const { data: run } = useRun(id);
   const { events, connected } = useRunStream(id);
   const { data: openApprovals } = useApprovals("open");
-  const control = useRunControl(id);
+  const { control: runControl, isPending: controlPending, transport } = useRunControlChannel(id);
   const [comment, setComment] = useState("");
 
   const terminalNow = !!run && TERMINAL.has(run.state);
@@ -52,7 +53,7 @@ export default function RunDetailPage() {
 
   async function act(op: "pause" | "resume" | "cancel") {
     try {
-      await control.mutateAsync({ op });
+      await runControl(op);
     } catch (err) {
       toast.error(authErrorMessage(err));
     }
@@ -61,7 +62,7 @@ export default function RunDetailPage() {
   async function sendComment() {
     if (!comment.trim()) return;
     try {
-      await control.mutateAsync({ op: "comment", body: { text: comment } });
+      await runControl("comment", { text: comment });
       setComment("");
       toast.success("Comment sent");
     } catch (err) {
@@ -104,15 +105,27 @@ export default function RunDetailPage() {
 
           {!terminal && (
             <div className="flex items-center gap-2">
-              <Button size="sm" variant="outline" onClick={() => act("pause")} disabled={control.isPending}>
+              <span
+                title={
+                  transport === "ws"
+                    ? "control actions over the live WebSocket channel"
+                    : "WebSocket unavailable — control actions fall back to REST"
+                }
+                className={`rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide ${
+                  transport === "ws" ? "bg-ok/15 text-ok" : "bg-panel-2 text-muted"
+                }`}
+              >
+                {transport}
+              </span>
+              <Button size="sm" variant="outline" onClick={() => act("pause")} disabled={controlPending}>
                 <Pause className="h-3.5 w-3.5" />
                 Pause
               </Button>
-              <Button size="sm" variant="outline" onClick={() => act("resume")} disabled={control.isPending}>
+              <Button size="sm" variant="outline" onClick={() => act("resume")} disabled={controlPending}>
                 <Play className="h-3.5 w-3.5" />
                 Resume
               </Button>
-              <Button size="sm" variant="destructive" onClick={() => act("cancel")} disabled={control.isPending}>
+              <Button size="sm" variant="destructive" onClick={() => act("cancel")} disabled={controlPending}>
                 <XCircle className="h-3.5 w-3.5" />
                 Cancel
               </Button>
@@ -163,7 +176,7 @@ export default function RunDetailPage() {
                     onChange={(e) => setComment(e.target.value)}
                     onKeyDown={(e) => e.key === "Enter" && sendComment()}
                   />
-                  <Button size="sm" onClick={sendComment} disabled={control.isPending || !comment.trim()}>
+                  <Button size="sm" onClick={sendComment} disabled={controlPending || !comment.trim()}>
                     <Send className="h-3.5 w-3.5" />
                   </Button>
                 </div>

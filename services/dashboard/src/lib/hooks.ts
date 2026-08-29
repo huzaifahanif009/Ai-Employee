@@ -286,18 +286,6 @@ export function useStartRun() {
   });
 }
 
-export function useRunControl(runId: string) {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (input: { op: "pause" | "resume" | "cancel" | "comment"; body?: object }) =>
-      api.post(`/runs/${runId}/${input.op}`, input.body ?? {}),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: keys.run(runId) });
-      qc.invalidateQueries({ queryKey: ["runs"] });
-    },
-  });
-}
-
 export function useDecideApproval() {
   const qc = useQueryClient();
   return useMutation({

@@ -3,6 +3,7 @@ import './config/load-env';
 import { Logger, ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { WsAdapter } from '@nestjs/platform-ws';
 import { AppModule } from './app.module';
 import { loadConfig } from './config/config';
 
@@ -17,6 +18,8 @@ async function bootstrap() {
     new ValidationPipe({ whitelist: true, transform: true, forbidNonWhitelisted: true }),
   );
   app.enableCors({ origin: true, credentials: true });
+  // native-WebSocket control channel at /api/v1/control (ControlGateway)
+  app.useWebSocketAdapter(new WsAdapter(app));
   app.enableShutdownHooks();
 
   const swagger = new DocumentBuilder()

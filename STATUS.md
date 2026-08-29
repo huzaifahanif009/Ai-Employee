@@ -20,6 +20,20 @@
 | **HITL / Approvals** (new): plan-approval gate blocks a Run, `reject` with no note → 400, `approve` resumes the run to `succeeded`, `reject` (with note) fails it as `plan_rejected` with the note surfaced as the failure message | ✅ all four paths verified live via the API |
 | Dashboard (`:8080`) served through nginx, proxies `/api/*` including SSE | ✅ 200, login round-trips to core |
 
+## Verified on this machine (2026-08-29) — WebSocket control channel slice
+
+| Check | Result |
+|-------|--------|
+| `npm test` (core, 11 suites incl. new `control.gateway.spec.ts` — 9 cases) | ✅ 72/72 |
+| WS handshake with a bad `?token=` | ✅ `error` frame + close **4401** |
+| WS handshake with a valid token | ✅ `hello` frame (userId / tenantId / role) |
+| `{event:subscribe,{runId}}` | ✅ `subscribed`, then live `run.event` frames (state, plan, model_call, approval…) over the same socket |
+| `{event:control,{runId,op:pause}}` → `RunsService.control` | ✅ `control:ack` + `run.paused` pushed back; `resume` → `control:ack` + `run.resumed` |
+| `subscribe` / `control` before auth | ✅ rejected `{event:error}` |
+| control with a role lacking `run:control` | ✅ `control:error` (capability check) |
+| unknown op / `RunsService` failure | ✅ `control:error` with message; `ping` → `pong` |
+| Dashboard run detail uses the socket, `ws`/`rest` transport pill, REST auto-fallback | ✅ builds; hook `useRunControlChannel` |
+
 ## Verified on this machine (2026-08-29) — Webhook signature verification slice
 
 | Check | Result |
@@ -60,7 +74,9 @@ services/core/  (NestJS)   config (Joi-validated, fail-fast) · health · auth (
                           argon2) · RBAC guard + capability matrix + request context ·
                           Problem-Details filter (RFC 9457) · TypeORM entities + init migration +
                           seed · Projects · WorkItems · Runs (state machine, list/get/start/
-                          pause/resume/cancel/comment) · EventBus (memory + redis-streams) ·
+                          pause/resume/cancel/comment over REST **and** the `/api/v1/control`
+                          WebSocket gateway — JWT handshake, per-run subscribe, `control:ack`,
+                          `run:control` RBAC) · EventBus (memory + redis-streams) ·
                           RunEventsService (append w/ advisory-lock seq + outbox publish) ·
                           SSE endpoints (/streams/runs/:id + /streams/fleet, Last-Event-ID backfill) ·
                           Approvals (real HITL: ApprovalGateService raise/wait/notify, decide
@@ -151,7 +167,9 @@ services/dashboard/        **Next.js 16 + React 19 + Tailwind v4 + Radix (shadcn
                           tabs derived from events, pause/resume/cancel/comment, inline approval
                           card), Approvals inbox, Work Items (list + create dialog + start run).
                           Run detail tabs: Activity (live), Plan, Changes, Tools, Verification,
-                          Review, Delivery, Cost. **Integrations screen** — add/test/delete a
+                          Review, Delivery, Cost. Run detail drives pause/resume/cancel/comment
+                          over the **WebSocket control channel** (`/api/v1/control`, `ws`/`rest`
+                          transport pill, REST fallback). **Integrations screen** — add/test/delete a
                           GitLab connector (base URL + project path + token, password field),
                           browse its repositories, bind one to the demo project. **AI Providers &
                           Models screen** (`/ai`) — add providers, add/edit/delete/test multiple
@@ -190,7 +208,7 @@ npm run -w @praxis/dashboard dev       # :3000 by default — set PORT=3001; bro
 ## Known gaps / next (Phase 2 — [`prd/phases/phase-2-foundation.md`](./prd/phases/phase-2-foundation.md))
 
 - **Orchestrator not wired** — `RUN_DRIVER=inproc` runs a demo advancer inside core. Phase 2 swaps in the Temporal `RunWorkflow` (`RUN_DRIVER=temporal` + run `@praxis/orchestrator`) as the thing that *advances* a Run; the Approval gates built this session are driver-agnostic (raise via `ApprovalGateService.create()`, resume via signal instead of the in-memory waiter) so they carry over unchanged.
-- **WebSocket control channel** — pause/resume/comment currently go over REST; WS `/v1/control` is Phase 2.
+- **WebSocket control channel — done** (`services/core/src/runs/control.gateway.ts`, `@nestjs/platform-ws` `WsAdapter` at `/api/v1/control`). Token in the handshake query (browsers can't set WS headers), `subscribe` streams a run's events back over the socket, `control` runs pause/resume/cancel/comment through `RunsService.control` with a `control:ack`/`control:error` reply and an `run:control` capability check. Dashboard run detail uses it (`useRunControlChannel`) with the REST endpoints as automatic fallback. Follow-up: move the InprocRunDriver pause/cancel from an in-memory flag to the same mechanism the Temporal driver will use (signals).
 - **Sandbox** — `docker` backend + Tool Broker done for this slice. Follow-ups: Firecracker/gVisor backends (real isolation — the docker backend is explicitly *not* a boundary), egress allowlisting proxy, warm pool, snapshot/restore for pause/resume, per-Run scoped Git credentials (needs a VCS connector), a real repo clone (uses an in-container fixture today).
 - **Model Router + AI Providers — done for this slice** (`services/core/src/ai/`, `services/core/src/model/`). DB-backed per-tenant provider/key/model registry with dashboard CRUD, encrypted keys, `provider:write` RBAC, direct provider adapters, stub fallback. Follow-ups: tenant/project *monthly* budget caps (only per-Run enforced now), semantic cache, true token streaming (currently `stream()` chunks a completed response), OTel `gen_ai.*` spans, `/model/usage` aggregation endpoint for analytics, move the encrypted key store behind a real `SecretsProvider` (Infisical), wire the Python LangGraph Coder to drive tools for real once a live key is added.
 - **Risky-tool + review-block + non-progress approval gates** — plan / delivery / **budget** gates are wired; the other three gate types from prd/06 §5 use the same `ApprovalGateService` but aren't triggered by anything yet (no real tool execution or reviewer exists to trigger them).
