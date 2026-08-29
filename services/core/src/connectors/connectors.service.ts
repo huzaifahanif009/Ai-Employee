@@ -7,8 +7,18 @@ import type { TrackerProvider } from "@praxis/contracts";
 import { decryptSecret, deriveKey, encryptSecret, secretHint } from "../common/crypto";
 import { AppConfig, CONFIG } from "../config/config";
 import { ConnectorEntity, ConnectorKind, ProjectEntity } from "../database/entities";
+import { GitHubTrackerProvider } from "../tracker/github.tracker";
 import { GitLabTrackerProvider } from "../tracker/gitlab.tracker";
+import { GitHubVcsProvider } from "../vcs/github.provider";
 import { GitLabVcsProvider } from "../vcs/gitlab.provider";
+
+/** owner/repo from either a `path`/`projectPath` string or explicit fields */
+function ownerRepo(config: Record<string, unknown>): { owner: string; repo: string } {
+  if (config.owner && config.repo) return { owner: String(config.owner), repo: String(config.repo) };
+  const path = String(config.projectPath ?? config.path ?? "");
+  const parts = path.split("/").filter(Boolean);
+  return { owner: parts.slice(0, -1).join("/"), repo: parts.at(-1) ?? "" };
+}
 
 export interface CreateConnectorInput {
   kind: ConnectorKind;
@@ -58,18 +68,31 @@ export class ConnectorsService {
     if (!VCS_KINDS.includes(input.kind)) {
       throw new PraxisError("VALIDATION", `unsupported connector kind: ${input.kind}`, 400);
     }
-    if (input.kind !== "gitlab") {
-      throw new PraxisError("VALIDATION", `only 'gitlab' is implemented so far (contract supports the rest)`, 400);
+    if (input.kind !== "gitlab" && input.kind !== "github") {
+      throw new PraxisError("VALIDATION", `'${input.kind}' not implemented yet — use 'gitlab' or 'github'`, 400);
     }
     if (!input.token?.trim()) throw new PraxisError("VALIDATION", "token is required", 400);
-    if (!input.config?.baseUrl) throw new PraxisError("VALIDATION", "config.baseUrl is required", 400);
+
+    const baseUrl =
+      (input.config.baseUrl as string | undefined)?.replace(/\/$/, "") ||
+      (input.kind === "github" ? "https://api.github.com" : "");
+    if (!baseUrl) throw new PraxisError("VALIDATION", "config.baseUrl is required", 400);
+
+    const cfg: Record<string, unknown> = { baseUrl };
+    if (input.kind === "gitlab") cfg.projectPath = input.config.projectPath ?? null;
+    if (input.kind === "github") {
+      const { owner, repo } = ownerRepo(input.config);
+      cfg.owner = owner || null;
+      cfg.repo = repo || null;
+      cfg.projectPath = owner && repo ? `${owner}/${repo}` : null;
+    }
 
     let c = this.repo.create({
       tenantId,
       kind: input.kind,
       name: input.name,
-      contracts: ["vcs", "tracker"], // GitLab connectors serve both (VcsProvider + issue TrackerProvider)
-      config: { baseUrl: String(input.config.baseUrl).replace(/\/$/, ""), projectPath: input.config.projectPath ?? null },
+      contracts: ["vcs", "tracker"],
+      config: cfg,
       authKind: "token",
       secretCiphertext: encryptSecret(input.token, this.key),
       secretHint: secretHint(input.token),
@@ -127,6 +150,10 @@ export class ConnectorsService {
           projectPath: String(c.config.projectPath ?? ""),
           token,
         });
+      case "github": {
+        const { owner, repo } = ownerRepo(c.config);
+        return new GitHubVcsProvider({ baseUrl: String(c.config.baseUrl), owner, repo, token });
+      }
       default:
         throw new PraxisError("VCS_ERROR", `no VcsProvider for kind ${c.kind}`, 500);
     }
@@ -135,12 +162,18 @@ export class ConnectorsService {
   resolveTracker(c: ConnectorEntity): TrackerProvider {
     if (!c.secretCiphertext) throw new PraxisError("VCS_ERROR", "connector has no credential", 400);
     const token = decryptSecret(c.secretCiphertext, this.key);
-    if (c.kind !== "gitlab") throw new PraxisError("VCS_ERROR", `no TrackerProvider for kind ${c.kind}`, 500);
-    return new GitLabTrackerProvider({
-      baseUrl: String(c.config.baseUrl),
-      projectPath: String(c.config.projectPath ?? ""),
-      token,
-    });
+    if (c.kind === "gitlab") {
+      return new GitLabTrackerProvider({
+        baseUrl: String(c.config.baseUrl),
+        projectPath: String(c.config.projectPath ?? ""),
+        token,
+      });
+    }
+    if (c.kind === "github") {
+      const { owner, repo } = ownerRepo(c.config);
+      return new GitHubTrackerProvider({ baseUrl: String(c.config.baseUrl), owner, repo, token });
+    }
+    throw new PraxisError("VCS_ERROR", `no TrackerProvider for kind ${c.kind}`, 500);
   }
 
   async getForTenant(tenantId: string, id: string): Promise<ConnectorEntity | null> {
@@ -174,12 +207,16 @@ export class ConnectorsService {
     if (!c?.secretCiphertext) return null;
     const token = decryptSecret(c.secretCiphertext, this.key);
     const path = String(c.config.projectPath ?? project.repoRef?.path ?? "");
-    const host = String(c.config.baseUrl).replace(/^https?:\/\//, "");
-    return {
-      provider: this.resolveVcs(c),
-      connector: c,
-      token,
-      cloneUrl: `https://oauth2:${token}@${host}/${path}.git`,
-    };
+    let cloneUrl: string;
+    if (c.kind === "github") {
+      // api.github.com → github.com for cloning; GHE keeps its host
+      const apiHost = String(c.config.baseUrl).replace(/^https?:\/\//, "");
+      const gitHost = apiHost === "api.github.com" ? "github.com" : apiHost.replace(/\/api\/v3$/, "");
+      cloneUrl = `https://x-access-token:${token}@${gitHost}/${path}.git`;
+    } else {
+      const host = String(c.config.baseUrl).replace(/^https?:\/\//, "");
+      cloneUrl = `https://oauth2:${token}@${host}/${path}.git`;
+    }
+    return { provider: this.resolveVcs(c), connector: c, token, cloneUrl };
   }
 }

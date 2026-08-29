@@ -57,6 +57,13 @@ export class RunsService {
     return r;
   }
 
+  findByBranch(tenantId: string, branchName: string) {
+    return this.runs.findOne({
+      where: { tenantId, branchName },
+      order: { createdAt: 'DESC' },
+    });
+  }
+
   async listEvents(tenantId: string, id: string, afterSeq = 0, limit = 200) {
     await this.get(tenantId, id);
     return this.events.since(id, afterSeq, limit);

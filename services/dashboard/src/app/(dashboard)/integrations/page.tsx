@@ -48,7 +48,7 @@ export default function IntegrationsPage() {
               Add connector
             </Button>
           </DialogTrigger>
-          <DialogContent title="Add a GitLab connector">
+          <DialogContent title="Add a Git connector">
             <AddConnectorForm onDone={() => setOpen(false)} />
           </DialogContent>
         </Dialog>
@@ -138,13 +138,13 @@ function ConnectorCard({ connector: c }: { connector: Connector }) {
           <GitBranch className="h-3 w-3" />
           {showRepos ? "hide" : "browse"} repositories
         </button>
-        {showRepos && <RepoBrowser connectorId={c.id} />}
+        {showRepos && <RepoBrowser connectorId={c.id} kind={c.kind} />}
       </CardContent>
     </Card>
   );
 }
 
-function RepoBrowser({ connectorId }: { connectorId: string }) {
+function RepoBrowser({ connectorId, kind }: { connectorId: string; kind: string }) {
   const { data: repos, isLoading, error } = useConnectorRepos(connectorId);
   const { data: projects } = useProjects();
   const bind = useBindProjectRepo();
@@ -170,7 +170,7 @@ function RepoBrowser({ connectorId }: { connectorId: string }) {
                 .mutateAsync({
                   projectId: project!.id,
                   vcsConnectorId: connectorId,
-                  repoRef: { provider: "gitlab", owner: r.owner, name: r.name, path: `${r.owner}/${r.name}` },
+                  repoRef: { provider: kind, owner: r.owner, name: r.name, path: `${r.owner}/${r.name}` },
                 })
                 .then(() => toast.success(`Bound to project "${project!.name}"`))
                 .catch((e) => toast.error(authErrorMessage(e)))
@@ -186,18 +186,30 @@ function RepoBrowser({ connectorId }: { connectorId: string }) {
   );
 }
 
+const DEFAULT_BASE: Record<string, string> = {
+  gitlab: "https://gitlab.edap.com.pk",
+  github: "https://api.github.com",
+};
+
 function AddConnectorForm({ onDone }: { onDone: () => void }) {
   const create = useCreateConnector();
+  const [kind, setKind] = useState<"gitlab" | "github">("gitlab");
   const [name, setName] = useState("EDAP GitLab");
-  const [baseUrl, setBaseUrl] = useState("https://gitlab.edap.com.pk");
+  const [baseUrl, setBaseUrl] = useState(DEFAULT_BASE.gitlab);
   const [projectPath, setProjectPath] = useState("");
   const [token, setToken] = useState("");
+
+  function switchKind(k: "gitlab" | "github") {
+    setKind(k);
+    setBaseUrl(DEFAULT_BASE[k]);
+    setName(k === "github" ? "GitHub" : "EDAP GitLab");
+  }
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     try {
       const c = await create.mutateAsync({
-        kind: "gitlab",
+        kind,
         name,
         config: { baseUrl, projectPath: projectPath.trim() || undefined },
         token: token.trim(),
@@ -211,19 +223,36 @@ function AddConnectorForm({ onDone }: { onDone: () => void }) {
 
   return (
     <form onSubmit={submit} className="space-y-3">
+      <div className="flex gap-1 rounded-md bg-panel-2 p-1 text-sm">
+        {(["gitlab", "github"] as const).map((k) => (
+          <button
+            key={k}
+            type="button"
+            onClick={() => switchKind(k)}
+            className={`flex-1 rounded px-2 py-1.5 capitalize ${kind === k ? "bg-panel text-text" : "text-muted"}`}
+          >
+            {k}
+          </button>
+        ))}
+      </div>
       <div className="space-y-1.5">
         <Label htmlFor="name">Name</Label>
         <Input id="name" value={name} onChange={(e) => setName(e.target.value)} required />
       </div>
       <div className="space-y-1.5">
-        <Label htmlFor="baseUrl">GitLab base URL</Label>
+        <Label htmlFor="baseUrl">API base URL</Label>
         <Input id="baseUrl" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} required />
+        <p className="text-[11px] text-muted">
+          {kind === "github"
+            ? "https://api.github.com — or https://<ghe-host>/api/v3 for Enterprise"
+            : "Your GitLab host, e.g. https://gitlab.com or a self-hosted instance"}
+        </p>
       </div>
       <div className="space-y-1.5">
-        <Label htmlFor="path">Project path (optional)</Label>
+        <Label htmlFor="path">{kind === "github" ? "owner/repo" : "Project path"} (optional)</Label>
         <Input
           id="path"
-          placeholder="huzaifahanif307/calculator"
+          placeholder={kind === "github" ? "octocat/hello-world" : "huzaifahanif307/calculator"}
           value={projectPath}
           onChange={(e) => setProjectPath(e.target.value)}
         />
@@ -236,13 +265,17 @@ function AddConnectorForm({ onDone }: { onDone: () => void }) {
         <Input
           id="token"
           type="password"
-          placeholder="glpat-…"
+          placeholder={kind === "github" ? "ghp_… / github_pat_…" : "glpat-…"}
           value={token}
           onChange={(e) => setToken(e.target.value)}
           required
         />
         <p className="text-[11px] text-muted">
-          Personal / project access token with <code>api</code> + <code>write_repository</code> scope.
+          {kind === "github" ? (
+            <>PAT with <code>repo</code> scope (classic) or contents+PRs+issues (fine-grained).</>
+          ) : (
+            <>PAT with <code>api</code> + <code>write_repository</code> scope.</>
+          )}{" "}
           Stored encrypted at rest.
         </p>
       </div>

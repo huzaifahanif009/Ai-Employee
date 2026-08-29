@@ -260,12 +260,17 @@ export class GitLabVcsProvider implements VcsProvider {
     const kind = headers["x-gitlab-event"];
     const repo: RepoId = { owner: this.cfg.projectPath.split("/")[0], name: this.cfg.projectPath.split("/").pop()! };
     if (kind === "Merge Request Hook") {
-      const action = b.object_attributes?.action;
+      const a = b.object_attributes ?? {};
       return [
         {
-          type: action === "merge" ? "git.pr.merged" : action === "close" ? "git.pr.closed" : "git.pr.updated",
+          type: a.action === "merge" ? "git.pr.merged" : a.action === "close" ? "git.pr.closed" : "git.pr.updated",
           repo,
-          payload: { iid: b.object_attributes?.iid, state: b.object_attributes?.state, url: b.object_attributes?.url },
+          payload: {
+            number: a.iid,
+            state: a.state,
+            url: a.url,
+            headBranch: a.source_branch,
+          },
         },
       ];
     }
