@@ -36,8 +36,10 @@ export const DEFAULT_MODELS: Record<
     { alias: "strong", providerModel: "claude-3-5-sonnet-latest", routingClasses: ["balanced", "strong", "code"], contextWindow: 200000, maxOutput: 64000, priceIn: 3, priceOut: 15, capabilities: ["tools", "json_schema", "vision", "prompt_cache"] },
   ],
   google: [
-    { alias: "fast", providerModel: "gemini-1.5-flash", routingClasses: ["fast"], contextWindow: 1000000, maxOutput: 8000, priceIn: 0.075, priceOut: 0.3, capabilities: ["tools", "json_schema", "vision"] },
-    { alias: "long-context", providerModel: "gemini-1.5-pro", routingClasses: ["balanced", "strong", "long-context"], contextWindow: 2000000, maxOutput: 8000, priceIn: 1.25, priceOut: 5, capabilities: ["tools", "json_schema", "vision"] },
+    // gemini-3.6-flash is on the Gemini API free tier; gemini-3.1-pro-preview needs a
+    // billed project. Both are editable per tenant on the AI Providers screen.
+    { alias: "fast", providerModel: "gemini-3.6-flash", routingClasses: ["fast", "code"], contextWindow: 1000000, maxOutput: 8000, priceIn: 0.075, priceOut: 0.3, capabilities: ["tools", "json_schema", "vision"] },
+    { alias: "long-context", providerModel: "gemini-3.1-pro-preview", routingClasses: ["balanced", "strong", "long-context"], contextWindow: 2000000, maxOutput: 8000, priceIn: 1.25, priceOut: 5, capabilities: ["tools", "json_schema", "vision"] },
   ],
   "openai-compatible": [],
   "azure-openai": [],
