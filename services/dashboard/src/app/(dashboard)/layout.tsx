@@ -18,6 +18,7 @@ const TITLES: Record<string, string> = {
   "/work-items": "Work Items",
   "/integrations": "Integrations",
   "/ai": "AI Providers & Models",
+  "/architecture": "Architecture & System Design",
 };
 
 function titleFor(pathname: string): string {
@@ -60,11 +61,13 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   }
 
   return (
-    <div className="flex h-full">
+    <div className="app-backdrop flex h-full">
       <Sidebar openApprovals={openApprovals?.length ?? 0} />
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className="relative z-10 flex min-w-0 flex-1 flex-col">
         <Topbar connected={connected} title={titleFor(pathname)} />
-        <main className="scroll-thin flex-1 overflow-y-auto p-5">{children}</main>
+        <main key={pathname} className="scroll-thin animate-fade-up flex-1 overflow-y-auto p-6">
+          {children}
+        </main>
       </div>
     </div>
   );

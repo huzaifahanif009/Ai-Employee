@@ -1,10 +1,22 @@
 import * as React from "react";
 import { cn } from "@/lib/utils";
 
-export function Card({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
+interface CardProps extends React.HTMLAttributes<HTMLDivElement> {
+  interactive?: boolean;
+  glass?: boolean;
+  glow?: boolean;
+}
+
+export function Card({ className, interactive, glass, glow, ...props }: CardProps) {
   return (
     <div
-      className={cn("rounded-xl border border-line bg-panel shadow-[var(--shadow)]", className)}
+      className={cn(
+        "relative rounded-[var(--radius)] border border-line shadow-[var(--shadow)]",
+        glass ? "surface-glass" : "bg-panel",
+        interactive && "hover-lift cursor-pointer",
+        glow && "ring-accent",
+        className,
+      )}
       {...props}
     />
   );

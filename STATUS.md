@@ -20,6 +20,18 @@
 | **HITL / Approvals** (new): plan-approval gate blocks a Run, `reject` with no note → 400, `approve` resumes the run to `succeeded`, `reject` (with note) fails it as `plan_rejected` with the note surfaced as the failure message | ✅ all four paths verified live via the API |
 | Dashboard (`:8080`) served through nginx, proxies `/api/*` including SSE | ✅ 200, login round-trips to core |
 
+## Verified on this machine (2026-08-29) — Dashboard redesign + Architecture screen
+
+| Check | Result |
+|-------|--------|
+| `npx tsc --noEmit` (dashboard) | ✅ clean |
+| `next build` — all 9 routes incl. new `/architecture` (prerendered static) | ✅ |
+| New design tokens (depth, gradient accent, glass, motion) + ambient backdrop | ✅ `globals.css` |
+| Shell: gradient logo, animated active-nav indicator, grouped sidebar, glass topbar w/ breadcrumb + avatar | ✅ |
+| Primitives: `Card` (interactive/glass/glow), gradient `Button`, `StatTile` w/ icon + glow, connection pill | ✅ |
+| **Architecture & System Design** screen (`/architecture`) — interactive system map (click a component → detail), 9-stage run-lifecycle stepper, API surface, real-time channels, security model; live badges (event/state counts, connector + provider-kind counts) | ✅ serves 200, prerenders |
+| Standing rule recorded: update `/architecture` in the same change as any phase/feature/API/schema shift | ✅ memory `feedback-architecture-screen` |
+
 ## Verified on this machine (2026-08-29) — WebSocket control channel slice
 
 | Check | Result |
@@ -213,7 +225,8 @@ npm run -w @praxis/dashboard dev       # :3000 by default — set PORT=3001; bro
 - **Model Router + AI Providers — done for this slice** (`services/core/src/ai/`, `services/core/src/model/`). DB-backed per-tenant provider/key/model registry with dashboard CRUD, encrypted keys, `provider:write` RBAC, direct provider adapters, stub fallback. Follow-ups: tenant/project *monthly* budget caps (only per-Run enforced now), semantic cache, true token streaming (currently `stream()` chunks a completed response), OTel `gen_ai.*` spans, `/model/usage` aggregation endpoint for analytics, move the encrypted key store behind a real `SecretsProvider` (Infisical), wire the Python LangGraph Coder to drive tools for real once a live key is added.
 - **Risky-tool + review-block + non-progress approval gates** — plan / delivery / **budget** gates are wired; the other three gate types from prd/06 §5 use the same `ApprovalGateService` but aren't triggered by anything yet (no real tool execution or reviewer exists to trigger them).
 - **Connectors** — **GitLab + GitHub** VCS & issue-tracker providers done; GitLab verified end-to-end against `gitlab.edap.com.pk/huzaifahanif307/calculator` (real MR !2); GitHub verified reaching `api.github.com` (graceful 401 with a fake token). PR/MR merge→close-issue webhook loop done. Follow-ups: Bitbucket + generic-git VcsProviders, EDAP Workdesk / Jira / Linear trackers, Slack ChatOps (would move approval decisions out of the dashboard-only path per `prd/09` §3), per-Run scoped tokens instead of the stored PAT (GitHub App installation tokens / GitLab project access tokens), move the token store behind a real `SecretsProvider` (Infisical), webhook signature verification — **done** (GitHub `X-Hub-Signature-256` HMAC-SHA256 over the raw body + GitLab `X-Gitlab-Token`, constant-time; per-connector encrypted secret, rotate endpoint, `WEBHOOK_REQUIRE_SIGNATURE` flag).
-- **Dashboard** — real Next.js app now covers the core loop (login → work items → runs → live run detail → approvals). Integrations + AI Providers & Models screens now built too. Not yet built from prd/12: Projects / Agents & Policies / Analytics / System Health / Audit Log screens (shown as a "Roadmap" section in the sidebar); WebSocket for control actions (uses REST); virtualized lists; a11y audit.
+- **Dashboard** — real Next.js app covers the core loop (login → work items → runs → live run detail → approvals) plus Integrations, AI Providers & Models, and an **Architecture & System Design** screen. Redesigned visual system (depth/gradient/glass tokens, motion, ambient backdrop, animated nav). Not yet built from prd/12: Projects / Agents & Policies / Analytics / System Health / Audit Log screens (shown as a "Roadmap" section in the sidebar); virtualized lists; a11y audit.
+- **Architecture & System Design screen must stay current** — team rule: update `/architecture` (`services/dashboard/src/app/(dashboard)/architecture/page.tsx`) in the same change as any phase, feature, API, schema, or data-flow change, so it always mirrors the real implementation.
 - **Dashboard framework decision** — Next.js (per user direction — separate from the EDAP Workdesk Angular app), not Angular. `prd/04` §15 / `prd/12` §1 name Angular as the default with Next.js an accepted alternative; the alternative was chosen. ADR update pending.
 - **Toolchain** — pinned below PRD targets (Node 20 / Python 3.10 / npm), see ADR-0011.
 - **Local ports** — Postgres on host **5433** (native PG holds 5432 on this machine).

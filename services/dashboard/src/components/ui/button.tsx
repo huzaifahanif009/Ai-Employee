@@ -6,15 +6,16 @@ import * as React from "react";
 import { cn } from "@/lib/utils";
 
 const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md text-sm font-medium transition-colors disabled:pointer-events-none disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]",
+  "inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-[10px] text-sm font-medium transition-all duration-150 active:scale-[0.97] disabled:pointer-events-none disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]",
   {
     variants: {
       variant: {
-        default: "bg-accent text-accent-fg hover:opacity-90",
-        outline: "border border-line bg-transparent text-text hover:bg-panel-2",
+        default:
+          "text-accent-fg shadow-[var(--shadow-sm)] [background-image:var(--gradient-accent)] hover:brightness-110 hover:shadow-[var(--glow-accent)]",
+        outline: "border border-line bg-transparent text-text hover:bg-panel-2 hover:border-line-strong",
         ghost: "bg-transparent text-text hover:bg-panel-2",
-        destructive: "bg-err text-err-fg hover:opacity-90",
-        subtle: "bg-panel-2 text-text hover:bg-line",
+        destructive: "bg-err text-err-fg hover:brightness-110",
+        subtle: "bg-panel-2 text-text hover:bg-panel-3",
       },
       size: {
         default: "h-9 px-3.5",

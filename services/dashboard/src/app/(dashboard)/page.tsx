@@ -1,5 +1,6 @@
 "use client";
 
+import { Activity, AlertTriangle, CheckCircle2, CircleDollarSign, Gauge, Inbox } from "lucide-react";
 import Link from "next/link";
 import { RunStateChip } from "@/components/state-chip";
 import { StatTile } from "@/components/stat-tile";
@@ -25,20 +26,17 @@ export default function OverviewPage() {
       : null;
 
   return (
-    <div className="space-y-5">
-      <div className="flex gap-3">
-        <StatTile label="Active runs" value={isLoading ? "…" : active.length} accent="accent" />
-        <StatTile label="Open approvals" value={approvals?.length ?? 0} accent={approvals?.length ? "warn" : undefined} />
-        <StatTile label="Succeeded" value={succeeded.length} accent="ok" />
-        <StatTile label="Failed" value={failed.length} accent={failed.length ? "err" : undefined} />
-        <StatTile
-          label="Success rate"
-          value={successRate === null ? "—" : `${successRate}%`}
-        />
-        <StatTile label="Spend (window)" value={formatUsd(totalCost)} />
+    <div className="space-y-6">
+      <div className="stagger grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6">
+        <StatTile icon={Activity} label="Active runs" value={isLoading ? "…" : active.length} accent="accent" />
+        <StatTile icon={Inbox} label="Open approvals" value={approvals?.length ?? 0} accent={approvals?.length ? "warn" : undefined} />
+        <StatTile icon={CheckCircle2} label="Succeeded" value={succeeded.length} accent="ok" />
+        <StatTile icon={AlertTriangle} label="Failed" value={failed.length} accent={failed.length ? "err" : undefined} />
+        <StatTile icon={Gauge} label="Success rate" value={successRate === null ? "—" : `${successRate}%`} />
+        <StatTile icon={CircleDollarSign} label="Spend (window)" value={formatUsd(totalCost)} />
       </div>
 
-      <div className="grid grid-cols-2 gap-5">
+      <div className="grid gap-5 lg:grid-cols-2">
         <Card>
           <CardHeader>
             <CardTitle>Active agents</CardTitle>

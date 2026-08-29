@@ -1,6 +1,6 @@
 "use client";
 
-import { Loader2, Sparkles } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -37,15 +37,22 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-full items-center justify-center bg-bg px-4">
-      <div className="w-full max-w-sm">
-        <div className="mb-6 flex items-center gap-2 text-lg font-semibold">
-          <Sparkles className="h-5 w-5 text-accent" />
-          Praxis
-          <span className="text-xs font-normal text-muted">operations console</span>
+    <div className="app-backdrop flex min-h-full items-center justify-center px-4">
+      <div className="relative z-10 w-full max-w-sm animate-scale-in">
+        <div className="mb-6 flex items-center gap-2.5">
+          <span className="grid h-9 w-9 place-items-center rounded-[10px] [background-image:var(--gradient-accent)] shadow-[var(--glow-accent)]">
+            <span className="text-base font-bold text-accent-fg">P</span>
+          </span>
+          <div className="leading-tight">
+            <div className="text-lg font-semibold tracking-tight">Praxis</div>
+            <div className="text-xs text-muted-2">execution platform · operations console</div>
+          </div>
         </div>
 
-        <form onSubmit={submit} className="space-y-3 rounded-xl border border-line bg-panel p-5">
+        <form
+          onSubmit={submit}
+          className="space-y-3 rounded-[var(--radius)] border border-line bg-panel p-5 shadow-[var(--shadow-lg)]"
+        >
           <div className="mb-1 flex gap-1 rounded-md bg-panel-2 p-1 text-sm">
             <button
               type="button"
