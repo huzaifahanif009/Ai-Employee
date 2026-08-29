@@ -289,10 +289,16 @@ export function useStartRun() {
 export function useDecideApproval() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (input: { id: string; decision: ApprovalDecision; note?: string }) =>
+    mutationFn: (input: {
+      id: string;
+      decision: ApprovalDecision;
+      note?: string;
+      payload?: Record<string, unknown>;
+    }) =>
       api.post<Approval>(`/approvals/${input.id}/decision`, {
         decision: input.decision,
         note: input.note,
+        payload: input.payload,
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["approvals"] });

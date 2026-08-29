@@ -9,4 +9,6 @@ export interface GateDecisionResult {
   decision: ApprovalDecision;
   note?: string;
   decidedBy: string;
+  /** optional structured data from the decision — e.g. an edited plan on a plan gate */
+  payload?: Record<string, unknown>;
 }

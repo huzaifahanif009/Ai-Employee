@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
-import { IsIn, IsOptional, IsString } from 'class-validator';
+import { IsIn, IsObject, IsOptional, IsString } from 'class-validator';
 import { Ctx, RequireCapability } from '../common/decorators';
 import { RequestContext } from '../common/request-context';
 import { ApprovalsService } from './approvals.service';
@@ -11,6 +11,9 @@ class DecisionDto {
   decision!: ApprovalDecision;
 
   @IsOptional() @IsString() note?: string;
+
+  /** e.g. { editedPlan: AgentStep[] } — used when approving a plan gate with edits */
+  @IsOptional() @IsObject() payload?: Record<string, unknown>;
 }
 
 @ApiTags('approvals')

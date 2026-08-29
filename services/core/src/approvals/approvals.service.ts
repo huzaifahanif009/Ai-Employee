@@ -12,6 +12,8 @@ import { ApprovalDecision } from './approvals.types';
 export interface DecisionInput {
   decision: ApprovalDecision;
   note?: string;
+  /** structured extras — e.g. { editedPlan: [...] } when approving a plan gate with changes */
+  payload?: Record<string, unknown>;
 }
 
 @Injectable()
@@ -76,6 +78,7 @@ export class ApprovalsService {
       decision: input.decision,
       note: input.note,
       decidedBy: ctx.userId,
+      payload: input.payload,
     });
 
     return approval;

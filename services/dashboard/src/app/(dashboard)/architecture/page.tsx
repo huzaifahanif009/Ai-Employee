@@ -24,7 +24,7 @@ import { cn } from "@/lib/utils";
 /* ─────────────────────────────────────────────────────────────────────────────
    This screen is a living map of the ACTUAL implementation. Per the team rule
    it is updated in the same change as any phase / feature / API / schema shift.
-   Last synced: 2026-08-29 — webhook signature verification + WS control channel.
+   Last synced: 2026-08-29 — real coder agent (CoderAgentService) + editable plan gate.
    ──────────────────────────────────────────────────────────────────────────── */
 
 type Node = {
@@ -92,6 +92,22 @@ const TIERS: { title: string; nodes: Node[] }[] = [
             "REST: list/get/start + pause/resume/cancel/comment",
             "WebSocket ControlGateway at /api/v1/control — JWT handshake, per-run subscribe, control:ack, run:control RBAC",
             "Gap-free per-run event seq via a Postgres advisory lock",
+          ],
+        },
+      },
+      {
+        id: "coder",
+        label: "Coder Agent",
+        sub: "analyze · plan · implement · review",
+        icon: Boxes,
+        tone: "accent",
+        detail: {
+          what: "The 'brain' of a run (CoderAgentService). Turns a work item + the real repo into a concrete plan and then real file changes via the Model Router — no infrastructure of its own, so it unit-tests with fakes.",
+          points: [
+            "analyzeRepo: git ls-files + key-file snippets → stack, test command, greenfield flag",
+            "plan → JSON steps (title / files / kind); editable by a human at the plan gate before execution",
+            "implementStep → full file contents written through the Tool Broker; one test-repair round on failure",
+            "review → verdict + findings on the real staged diff; empty diff fails the run",
           ],
         },
       },
@@ -328,36 +344,36 @@ const LIFECYCLE: Stage[] = [
   {
     key: "plan",
     title: "Plan",
-    by: "Runs · Model Router",
-    does: "Triage + plan model calls run through the Model Router; an ordered step list is emitted.",
-    events: ["run.state_changed → planning", "plan.created", "plan.step_defined"],
+    by: "Coder Agent · Model Router",
+    does: "analyzeRepo builds a digest of the real tree; one strong model call returns concrete JSON steps (title / target files / create|edit|delete).",
+    events: ["run.state_changed → planning", "progress.warning (repo_analysed)", "plan.created", "plan.step_defined"],
   },
   {
     key: "plan-gate",
     title: "Plan approval",
-    by: "ApprovalGateService (HITL)",
-    does: "REQUIRE_PLAN_APPROVAL blocks the run; a reviewer approves or rejects (reject needs a note).",
-    events: ["run.state_changed → awaiting_plan_approval", "approval.requested", "approval.decided"],
+    by: "ApprovalGateService (HITL) — editable",
+    does: "REQUIRE_PLAN_APPROVAL blocks the run. The reviewer can edit steps and files inline; approving sends the edited plan back and execution follows it.",
+    events: ["run.state_changed → awaiting_plan_approval", "approval.requested", "approval.decided", "progress.warning (plan_edited)"],
   },
   {
     key: "execute",
     title: "Execute",
-    by: "Sandbox · Tool Broker · Model Router",
-    does: "Acquire a container, clone the real repo (or a fixture), then per step: a coder model call + fs/git tool calls, all ledgered.",
-    events: ["run.state_changed → executing", "run_step.started/finished", "tool_call.*", "model_call.*"],
+    by: "Coder Agent · Sandbox · Tool Broker",
+    does: "Per step: implementStep asks the model for the COMPLETE new file contents, which are written through the Tool Broker (path-guarded). Real diffs, ledgered.",
+    events: ["run.state_changed → executing", "run_step.started/finished", "message.delta", "tool_call.*", "model_call.*"],
   },
   {
     key: "verify",
     title: "Verify",
-    by: "Tool Broker (test.run)",
-    does: "Run the project's tests inside the sandbox; a fail ends the run as tests_never_passed.",
+    by: "Coder Agent · Tool Broker (test.run)",
+    does: "If a test command was detected, install deps and run it. On failure: one repair round (feed the output back → rewrite → re-test), then continue (the PR is labelled needs-attention).",
     events: ["run.state_changed → verifying", "verify.started", "verify.check_finished", "verify.finished"],
   },
   {
     key: "review",
     title: "Review",
-    by: "Model Router (reviewer)",
-    does: "A reviewer model call assesses the diff against the acceptance criteria.",
+    by: "Coder Agent · Model Router (reviewer)",
+    does: "A reviewer model call assesses the real staged diff against the acceptance criteria → verdict + findings. An empty diff fails the run.",
     events: ["run.state_changed → reviewing", "review.started", "review.finished"],
   },
   {
@@ -371,7 +387,7 @@ const LIFECYCLE: Stage[] = [
     key: "deliver",
     title: "Deliver",
     by: "Sandbox · VcsProvider · TrackerProvider",
-    does: "Branch, commit, credentialed push, open a PR/MR, and comment the source issue with the link. Human merges manually.",
+    does: "Branch, commit (message + body from the plan summary), credentialed push, open a PR/MR whose body lists files changed + verify + review, and comment the source issue. Human merges manually.",
     events: ["run.state_changed → delivering", "git.branch.created", "git.pushed", "vcs.pr.opened", "run.completed"],
   },
   {
@@ -386,7 +402,7 @@ const LIFECYCLE: Stage[] = [
 const API_SURFACE: { group: string; routes: string[] }[] = [
   { group: "Auth", routes: ["POST /auth/login", "POST /auth/refresh", "GET /auth/me"] },
   { group: "Runs", routes: ["GET /runs", "GET /runs/:id", "POST /runs", "POST /runs/:id/{pause,resume,cancel,comment}", "GET /runs/:id/{events,model-calls,tool-calls}"] },
-  { group: "Approvals", routes: ["GET /approvals", "POST /approvals/:id/decision"] },
+  { group: "Approvals", routes: ["GET /approvals", "POST /approvals/:id/decision  { decision, note?, payload? }", "payload.editedPlan → run follows the human-edited plan"] },
   { group: "Work items / Intake", routes: ["GET/POST /work-items", "POST /projects/:id/intake/sync", "POST /webhooks/in/:connectorId (signed, public)"] },
   { group: "Connectors", routes: ["GET/POST/PATCH/DELETE /connectors", "POST /connectors/:id/{test,webhook-secret}", "GET /connectors/:id/repos"] },
   { group: "AI", routes: ["GET /ai/provider-kinds", "GET/POST /ai/providers", "POST /ai/providers/:id/keys", "POST /ai/keys/:id/test", "GET/POST /ai/models"] },
@@ -417,7 +433,7 @@ export default function ArchitecturePage() {
         <div className="relative">
           <div className="flex items-center gap-2 text-[11px] font-medium uppercase tracking-wider text-muted-2">
             <span className="h-1.5 w-1.5 rounded-full bg-ok" />
-            living document · synced 2026-08-29
+            living document · synced 2026-08-29 · real coder agent
           </div>
           <h2 className="mt-2 text-2xl font-semibold tracking-tight">
             How <span className="text-gradient">Praxis</span> fits together
