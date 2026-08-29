@@ -1,5 +1,8 @@
-import { Body, Controller, Headers, Logger, Param, Post } from "@nestjs/common";
+import { Body, Controller, Headers, Logger, Param, Post, Req } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
+import { PraxisError } from "@praxis/contracts";
+import type { RawBodyRequest } from "@nestjs/common";
+import type { Request } from "express";
 import { Ctx, Public, RequireCapability } from "../common/decorators";
 import { RequestContext } from "../common/request-context";
 import { ConnectorsService } from "../connectors/connectors.service";
@@ -33,20 +36,26 @@ export class WebhooksController {
     private readonly events: RunEventsService,
   ) {}
 
-  /** Public — GitLab / GitHub project webhook. URL carries the connector id; optional secret check. */
+  /**
+   * Public — GitLab / GitHub project webhook. The URL carries the connector id;
+   * the request is authenticated by the connector's stored webhook secret
+   * (GitHub HMAC-SHA256 over the raw body, or GitLab's X-Gitlab-Token).
+   */
   @Public()
   @Post(":connectorId")
   async receive(
     @Param("connectorId") connectorId: string,
     @Headers() headers: Record<string, string>,
     @Body() body: unknown,
+    @Req() req: RawBodyRequest<Request>,
   ) {
     const c = await this.connectors.findAnyById(connectorId);
-    if (!c) return { ok: false, reason: "unknown connector" };
+    if (!c) throw new PraxisError("NOT_FOUND", "unknown connector", 404);
 
-    const expected = (c.config.webhookSecret as string | undefined) ?? "";
-    if (expected && headers["x-gitlab-token"] !== expected && headers["x-hub-signature-256"] === undefined) {
-      return { ok: false, reason: "bad token" };
+    const verdict = this.connectors.verifyInboundWebhook(c, headers, req.rawBody);
+    if (!verdict.ok) {
+      this.log.warn(`webhook ${connectorId} rejected: ${verdict.reason}`);
+      throw new PraxisError("VALIDATION", `webhook rejected: ${verdict.reason}`, verdict.status ?? 401);
     }
 
     const results: Record<string, unknown> = {};

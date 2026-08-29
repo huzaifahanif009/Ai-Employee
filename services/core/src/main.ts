@@ -8,7 +8,9 @@ import { loadConfig } from './config/config';
 
 async function bootstrap() {
   const cfg = loadConfig();
-  const app = await NestFactory.create(AppModule, { bufferLogs: false });
+  // rawBody: keep the unparsed request body available (req.rawBody) for
+  // inbound-webhook HMAC verification (see WebhooksController).
+  const app = await NestFactory.create(AppModule, { bufferLogs: false, rawBody: true });
 
   app.setGlobalPrefix(cfg.apiPrefix, { exclude: ['healthz', 'readyz'] });
   app.useGlobalPipes(

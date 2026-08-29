@@ -44,6 +44,14 @@ export class ConnectorEntity {
   @Column({ type: "varchar", nullable: true })
   secretHint!: string | null;
 
+  /** AES-GCM ciphertext of the inbound-webhook secret (GitHub HMAC key / GitLab token). Never returned. */
+  @Column({ type: "text", nullable: true })
+  webhookSecretCiphertext!: string | null;
+
+  /** last 4 chars of the webhook secret, for the UI */
+  @Column({ type: "varchar", nullable: true })
+  webhookSecretHint!: string | null;
+
   @Column({ type: "varchar", default: "unconfigured" })
   status!: ConnectorStatus;
 

@@ -4,7 +4,13 @@ import { notFound, PraxisError } from "@praxis/contracts";
 import type { VcsProvider } from "@praxis/contracts";
 import { Repository } from "typeorm";
 import type { TrackerProvider } from "@praxis/contracts";
+import { randomBytes } from "node:crypto";
 import { decryptSecret, deriveKey, encryptSecret, secretHint } from "../common/crypto";
+import {
+  verifyWebhookSignature,
+  webhookFamilyFor,
+  type VerifyVerdict,
+} from "../common/webhook-signature";
 import { AppConfig, CONFIG } from "../config/config";
 import { ConnectorEntity, ConnectorKind, ProjectEntity } from "../database/entities";
 import { GitHubTrackerProvider } from "../tracker/github.tracker";
@@ -25,6 +31,7 @@ export interface CreateConnectorInput {
   name: string;
   config: Record<string, unknown>; // { baseUrl, projectPath? }
   token: string;
+  webhookSecret?: string;
 }
 
 const VCS_KINDS: ConnectorKind[] = ["gitlab", "github", "bitbucket", "generic-git"];
@@ -33,6 +40,7 @@ const VCS_KINDS: ConnectorKind[] = ["gitlab", "github", "bitbucket", "generic-gi
 export class ConnectorsService {
   private readonly log = new Logger("Connectors");
   private readonly key: Buffer;
+  private readonly requireWebhookSignature: boolean;
 
   constructor(
     @Inject(CONFIG) cfg: AppConfig,
@@ -40,12 +48,14 @@ export class ConnectorsService {
     @InjectRepository(ProjectEntity) private readonly projects: Repository<ProjectEntity>,
   ) {
     this.key = deriveKey(cfg.secretsEncryptionKey, cfg.jwtSecret);
+    this.requireWebhookSignature = cfg.webhookRequireSignature;
   }
 
-  /** public view — never the ciphertext */
+  /** public view — never any ciphertext */
   private view(c: ConnectorEntity) {
-    const { secretCiphertext, ...safe } = c;
+    const { secretCiphertext, webhookSecretCiphertext, ...safe } = c;
     void secretCiphertext;
+    void webhookSecretCiphertext;
     return safe;
   }
 
@@ -96,6 +106,10 @@ export class ConnectorsService {
       authKind: "token",
       secretCiphertext: encryptSecret(input.token, this.key),
       secretHint: secretHint(input.token),
+      webhookSecretCiphertext: input.webhookSecret?.trim()
+        ? encryptSecret(input.webhookSecret.trim(), this.key)
+        : null,
+      webhookSecretHint: input.webhookSecret?.trim() ? secretHint(input.webhookSecret.trim()) : null,
       status: "unconfigured",
     });
     c = await this.repo.save(c);
@@ -103,7 +117,11 @@ export class ConnectorsService {
     return this.get(tenantId, c.id).then((x) => this.view(x));
   }
 
-  async update(tenantId: string, id: string, patch: { name?: string; config?: Record<string, unknown>; token?: string }) {
+  async update(
+    tenantId: string,
+    id: string,
+    patch: { name?: string; config?: Record<string, unknown>; token?: string; webhookSecret?: string },
+  ) {
     const c = await this.get(tenantId, id);
     if (patch.name) c.name = patch.name;
     if (patch.config) c.config = { ...c.config, ...patch.config };
@@ -111,9 +129,65 @@ export class ConnectorsService {
       c.secretCiphertext = encryptSecret(patch.token, this.key);
       c.secretHint = secretHint(patch.token);
     }
+    if (patch.webhookSecret !== undefined) {
+      const s = patch.webhookSecret.trim();
+      c.webhookSecretCiphertext = s ? encryptSecret(s, this.key) : null;
+      c.webhookSecretHint = s ? secretHint(s) : null;
+    }
     await this.repo.save(c);
     await this.test(tenantId, id);
     return this.view(await this.get(tenantId, id));
+  }
+
+  /**
+   * Generate a fresh inbound-webhook secret, store it encrypted, and return the
+   * plaintext **once** so the operator can paste it into GitHub/GitLab. It is
+   * never retrievable again — rotate to get a new one.
+   */
+  async rotateWebhookSecret(tenantId: string, id: string) {
+    const c = await this.get(tenantId, id);
+    const secret = `whsec_${randomBytes(24).toString("base64url")}`;
+    c.webhookSecretCiphertext = encryptSecret(secret, this.key);
+    c.webhookSecretHint = secretHint(secret);
+    await this.repo.save(c);
+    const family = webhookFamilyFor(c.kind);
+    return {
+      secret,
+      hint: c.webhookSecretHint,
+      family,
+      header: family === "github" ? "X-Hub-Signature-256 (HMAC-SHA256)" : "X-Gitlab-Token",
+    };
+  }
+
+  /**
+   * Authenticate an inbound webhook against the connector's stored secret
+   * (prd/09 §5). GitHub → HMAC-SHA256 over the raw body; GitLab → shared token.
+   * When `WEBHOOK_REQUIRE_SIGNATURE=false` an unsigned/unknown-family request is
+   * allowed through (dev only) and logged.
+   */
+  verifyInboundWebhook(
+    c: ConnectorEntity,
+    headers: Record<string, string | undefined>,
+    rawBody: Buffer | undefined,
+  ): VerifyVerdict {
+    const family = webhookFamilyFor(c.kind);
+    if (!family) {
+      if (this.requireWebhookSignature) {
+        return { ok: false, status: 400, reason: `no webhook verification for kind ${c.kind}` };
+      }
+      this.log.warn(`webhook: unverifiable kind ${c.kind} allowed (WEBHOOK_REQUIRE_SIGNATURE=false)`);
+      return { ok: true };
+    }
+    const secret = c.webhookSecretCiphertext
+      ? decryptSecret(c.webhookSecretCiphertext, this.key)
+      : "";
+    if (!secret && !this.requireWebhookSignature) {
+      this.log.warn(
+        `webhook: connector ${c.id} has no secret; allowed (WEBHOOK_REQUIRE_SIGNATURE=false)`,
+      );
+      return { ok: true };
+    }
+    return verifyWebhookSignature({ family, secret, rawBody, headers });
   }
 
   async remove(tenantId: string, id: string) {

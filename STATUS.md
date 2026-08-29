@@ -20,6 +20,21 @@
 | **HITL / Approvals** (new): plan-approval gate blocks a Run, `reject` with no note → 400, `approve` resumes the run to `succeeded`, `reject` (with note) fails it as `plan_rejected` with the note surfaced as the failure message | ✅ all four paths verified live via the API |
 | Dashboard (`:8080`) served through nginx, proxies `/api/*` including SSE | ✅ 200, login round-trips to core |
 
+## Verified on this machine (2026-08-29) — Webhook signature verification slice
+
+| Check | Result |
+|-------|--------|
+| `npm test` (core, 10 suites incl. new `webhook-signature.spec.ts` — 14 cases) | ✅ 63/63 |
+| Migration `WebhookSecret1725600000000` (`connector.webhookSecretCiphertext` + `webhookSecretHint`) | ✅ applied |
+| `POST /connectors/:id/webhook-secret` (rotate) | ✅ returns plaintext once + `hint` + `family` + `header`; ciphertext never returned |
+| GitLab webhook — no secret configured (`WEBHOOK_REQUIRE_SIGNATURE=true`) | ✅ 403 |
+| GitLab webhook — wrong / missing `X-Gitlab-Token` | ✅ 401 |
+| GitLab webhook — correct token | ✅ 201 `{ok:true}` |
+| GitHub webhook — missing / bad `X-Hub-Signature-256` | ✅ 401 |
+| GitHub webhook — valid HMAC but tampered body | ✅ 401 (raw-body HMAC, constant-time compare) |
+| GitHub webhook — correct HMAC over raw body | ✅ 201 `{ok:true}` |
+| `webhookSecret` accepted at connector create; `webhookSecretHint` in list, ciphertext never | ✅ |
+
 ## Verified on this machine (2026-08-29) — AI Providers & Models slice
 
 | Check | Result |
@@ -81,8 +96,13 @@ services/core/  (NestJS)   config (Joi-validated, fail-fast) · health · auth (
                           repos, branches, protected branches, read-at-ref, create branch, open/
                           update PR/MR, comments, checks (pipelines / check-runs), hooks +
                           webhook normalize. `resolveVcs()`/`resolveTracker()` switch on kind;
-                          Bitbucket + generic-git still to do.
-                          `GET/POST/PATCH/DELETE /connectors`, `/connectors/:id/test|repos`.
+                          Bitbucket + generic-git still to do. **Inbound webhooks are
+                          authenticated** (prd/09 §5): per-connector secret encrypted at rest,
+                          GitHub `X-Hub-Signature-256` HMAC-SHA256 over the raw body / GitLab
+                          `X-Gitlab-Token`, constant-time compare, `POST /connectors/:id/
+                          webhook-secret` rotates it (plaintext shown once), `WEBHOOK_REQUIRE_
+                          SIGNATURE=true` rejects unverified deliveries (401 / 403 no-secret).
+                          `GET/POST/PATCH/DELETE /connectors`, `/connectors/:id/test|repos|webhook-secret`.
                           Project gains `vcsConnectorId` + `repoRef.path`. ·
                           **Tracker + Intake** (prd/09 §2): `GitLabTrackerProvider` — GitLab
                           issues as work items (list/get/normalize w/ acceptance-criteria
@@ -174,7 +194,7 @@ npm run -w @praxis/dashboard dev       # :3000 by default — set PORT=3001; bro
 - **Sandbox** — `docker` backend + Tool Broker done for this slice. Follow-ups: Firecracker/gVisor backends (real isolation — the docker backend is explicitly *not* a boundary), egress allowlisting proxy, warm pool, snapshot/restore for pause/resume, per-Run scoped Git credentials (needs a VCS connector), a real repo clone (uses an in-container fixture today).
 - **Model Router + AI Providers — done for this slice** (`services/core/src/ai/`, `services/core/src/model/`). DB-backed per-tenant provider/key/model registry with dashboard CRUD, encrypted keys, `provider:write` RBAC, direct provider adapters, stub fallback. Follow-ups: tenant/project *monthly* budget caps (only per-Run enforced now), semantic cache, true token streaming (currently `stream()` chunks a completed response), OTel `gen_ai.*` spans, `/model/usage` aggregation endpoint for analytics, move the encrypted key store behind a real `SecretsProvider` (Infisical), wire the Python LangGraph Coder to drive tools for real once a live key is added.
 - **Risky-tool + review-block + non-progress approval gates** — plan / delivery / **budget** gates are wired; the other three gate types from prd/06 §5 use the same `ApprovalGateService` but aren't triggered by anything yet (no real tool execution or reviewer exists to trigger them).
-- **Connectors** — **GitLab + GitHub** VCS & issue-tracker providers done; GitLab verified end-to-end against `gitlab.edap.com.pk/huzaifahanif307/calculator` (real MR !2); GitHub verified reaching `api.github.com` (graceful 401 with a fake token). PR/MR merge→close-issue webhook loop done. Follow-ups: Bitbucket + generic-git VcsProviders, EDAP Workdesk / Jira / Linear trackers, Slack ChatOps (would move approval decisions out of the dashboard-only path per `prd/09` §3), per-Run scoped tokens instead of the stored PAT (GitHub App installation tokens / GitLab project access tokens), move the token store behind a real `SecretsProvider` (Infisical), webhook signature verification (`x-hub-signature-256`).
+- **Connectors** — **GitLab + GitHub** VCS & issue-tracker providers done; GitLab verified end-to-end against `gitlab.edap.com.pk/huzaifahanif307/calculator` (real MR !2); GitHub verified reaching `api.github.com` (graceful 401 with a fake token). PR/MR merge→close-issue webhook loop done. Follow-ups: Bitbucket + generic-git VcsProviders, EDAP Workdesk / Jira / Linear trackers, Slack ChatOps (would move approval decisions out of the dashboard-only path per `prd/09` §3), per-Run scoped tokens instead of the stored PAT (GitHub App installation tokens / GitLab project access tokens), move the token store behind a real `SecretsProvider` (Infisical), webhook signature verification — **done** (GitHub `X-Hub-Signature-256` HMAC-SHA256 over the raw body + GitLab `X-Gitlab-Token`, constant-time; per-connector encrypted secret, rotate endpoint, `WEBHOOK_REQUIRE_SIGNATURE` flag).
 - **Dashboard** — real Next.js app now covers the core loop (login → work items → runs → live run detail → approvals). Integrations + AI Providers & Models screens now built too. Not yet built from prd/12: Projects / Agents & Policies / Analytics / System Health / Audit Log screens (shown as a "Roadmap" section in the sidebar); WebSocket for control actions (uses REST); virtualized lists; a11y audit.
 - **Dashboard framework decision** — Next.js (per user direction — separate from the EDAP Workdesk Angular app), not Angular. `prd/04` §15 / `prd/12` §1 name Angular as the default with Next.js an accepted alternative; the alternative was chosen. ADR update pending.
 - **Toolchain** — pinned below PRD targets (Node 20 / Python 3.10 / npm), see ADR-0011.

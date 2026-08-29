@@ -26,6 +26,9 @@ export interface AppConfig {
   requirePlanApproval: boolean;
   requireDeliveryApproval: boolean;
 
+  /** reject inbound webhooks that fail signature/token verification (prd/09 §5). */
+  webhookRequireSignature: boolean;
+
   agentRuntimeUrl: string;
   litellmBaseUrl: string;
   litellmMasterKey: string;
@@ -68,6 +71,7 @@ const schema = Joi.object({
   RUN_DRIVER: Joi.string().valid('temporal', 'inproc').default('inproc'),
   REQUIRE_PLAN_APPROVAL: Joi.boolean().truthy('true').falsy('false').default(true),
   REQUIRE_DELIVERY_APPROVAL: Joi.boolean().truthy('true').falsy('false').default(false),
+  WEBHOOK_REQUIRE_SIGNATURE: Joi.boolean().truthy('true').falsy('false').default(true),
 
   AGENT_RUNTIME_URL: Joi.string().uri().default('http://localhost:8081'),
   LITELLM_BASE_URL: Joi.string().uri().default('http://localhost:4000'),
@@ -114,6 +118,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     runDriver: value.RUN_DRIVER,
     requirePlanApproval: value.REQUIRE_PLAN_APPROVAL,
     requireDeliveryApproval: value.REQUIRE_DELIVERY_APPROVAL,
+    webhookRequireSignature: value.WEBHOOK_REQUIRE_SIGNATURE,
     agentRuntimeUrl: value.AGENT_RUNTIME_URL,
     litellmBaseUrl: value.LITELLM_BASE_URL,
     litellmMasterKey: value.LITELLM_MASTER_KEY,

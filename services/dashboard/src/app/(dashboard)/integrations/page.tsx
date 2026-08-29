@@ -1,8 +1,9 @@
 "use client";
 
-import { GitBranch, Link2, Loader2, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { Copy, GitBranch, KeyRound, Link2, Loader2, Plus, RefreshCw, Trash2, Webhook } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
+import { API_URL } from "@/lib/config";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -18,6 +19,7 @@ import {
   useCreateConnector,
   useDeleteConnector,
   useProjects,
+  useRotateWebhookSecret,
   useTestConnector,
 } from "@/lib/hooks";
 import type { Connector } from "@/lib/types";
@@ -131,6 +133,8 @@ function ConnectorCard({ connector: c }: { connector: Connector }) {
           <dd>{c.usedByProjects.length ? c.usedByProjects.map((p) => p.name).join(", ") : "none"}</dd>
         </dl>
 
+        <WebhookPanel connector={c} />
+
         <button
           className="flex items-center gap-1 text-xs text-accent hover:underline"
           onClick={() => setShowRepos((v) => !v)}
@@ -141,6 +145,79 @@ function ConnectorCard({ connector: c }: { connector: Connector }) {
         {showRepos && <RepoBrowser connectorId={c.id} kind={c.kind} />}
       </CardContent>
     </Card>
+  );
+}
+
+function WebhookPanel({ connector: c }: { connector: Connector }) {
+  const rotate = useRotateWebhookSecret();
+  const [revealed, setRevealed] = useState<string | null>(null);
+  const deliveryUrl = `${API_URL}/webhooks/in/${c.id}`;
+  const isGithub = c.kind === "github";
+
+  const copy = (text: string, label: string) =>
+    navigator.clipboard.writeText(text).then(() => toast.success(`${label} copied`));
+
+  return (
+    <div className="space-y-2 rounded-lg border border-line bg-bg p-2.5 text-xs">
+      <div className="flex items-center gap-1.5 font-medium text-text">
+        <Webhook className="h-3.5 w-3.5" />
+        Inbound webhook
+        {c.webhookSecretHint ? (
+          <Badge variant="ok">secret set</Badge>
+        ) : (
+          <Badge variant="warn">no secret — deliveries rejected</Badge>
+        )}
+      </div>
+
+      <div className="flex items-center gap-2">
+        <code className="min-w-0 flex-1 truncate rounded bg-panel-2 px-1.5 py-1 font-mono">{deliveryUrl}</code>
+        <Button variant="ghost" size="sm" onClick={() => copy(deliveryUrl, "Payload URL")}>
+          <Copy className="h-3 w-3" />
+        </Button>
+      </div>
+
+      <p className="text-muted">
+        In {isGithub ? "GitHub → Settings → Webhooks" : "GitLab → Settings → Webhooks"}: set the payload URL
+        above, {isGithub
+          ? "content type application/json, and paste the secret below (used as the HMAC-SHA256 key, sent as X-Hub-Signature-256)."
+          : "and paste the secret below into the Secret token field (sent as X-Gitlab-Token)."}
+      </p>
+
+      <div className="flex items-center gap-2">
+        <Button
+          variant="subtle"
+          size="sm"
+          disabled={rotate.isPending}
+          onClick={() =>
+            rotate
+              .mutateAsync(c.id)
+              .then((r) => {
+                setRevealed(r.secret);
+                toast.success("New webhook secret generated — copy it now, it won't be shown again");
+              })
+              .catch((e) => toast.error(authErrorMessage(e)))
+          }
+        >
+          {rotate.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <KeyRound className="h-3 w-3" />}
+          {c.webhookSecretHint ? "Rotate secret" : "Generate secret"}
+        </Button>
+        {c.webhookSecretHint && !revealed && (
+          <span className="font-mono text-muted">current: {c.webhookSecretHint}</span>
+        )}
+      </div>
+
+      {revealed && (
+        <div className="flex items-center gap-2 rounded bg-panel-2 p-1.5">
+          <code className="min-w-0 flex-1 truncate font-mono text-text">{revealed}</code>
+          <Button variant="ghost" size="sm" onClick={() => copy(revealed, "Secret")}>
+            <Copy className="h-3 w-3" />
+          </Button>
+          <Button variant="ghost" size="sm" onClick={() => setRevealed(null)}>
+            hide
+          </Button>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -198,6 +275,7 @@ function AddConnectorForm({ onDone }: { onDone: () => void }) {
   const [baseUrl, setBaseUrl] = useState(DEFAULT_BASE.gitlab);
   const [projectPath, setProjectPath] = useState("");
   const [token, setToken] = useState("");
+  const [webhookSecret, setWebhookSecret] = useState("");
 
   function switchKind(k: "gitlab" | "github") {
     setKind(k);
@@ -213,6 +291,7 @@ function AddConnectorForm({ onDone }: { onDone: () => void }) {
         name,
         config: { baseUrl, projectPath: projectPath.trim() || undefined },
         token: token.trim(),
+        webhookSecret: webhookSecret.trim() || undefined,
       });
       toast.success(`Connector added — ${c.status}`);
       onDone();
@@ -277,6 +356,20 @@ function AddConnectorForm({ onDone }: { onDone: () => void }) {
             <>PAT with <code>api</code> + <code>write_repository</code> scope.</>
           )}{" "}
           Stored encrypted at rest.
+        </p>
+      </div>
+      <div className="space-y-1.5">
+        <Label htmlFor="whsecret">Webhook secret (optional)</Label>
+        <Input
+          id="whsecret"
+          type="password"
+          placeholder="leave blank to generate one after"
+          value={webhookSecret}
+          onChange={(e) => setWebhookSecret(e.target.value)}
+        />
+        <p className="text-[11px] text-muted">
+          Verifies inbound webhooks ({kind === "github" ? "X-Hub-Signature-256 HMAC" : "X-Gitlab-Token"}).
+          You can also generate/rotate it from the connector card. Stored encrypted at rest.
         </p>
       </div>
       <Button type="submit" className="w-full" disabled={create.isPending}>

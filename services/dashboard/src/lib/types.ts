@@ -150,6 +150,7 @@ export interface Connector {
   config: { baseUrl?: string; projectPath?: string | null };
   authKind: string;
   secretHint: string | null;
+  webhookSecretHint: string | null;
   status: "healthy" | "degraded" | "down" | "unconfigured";
   healthDetail: string | null;
   lastHealthAt: string | null;

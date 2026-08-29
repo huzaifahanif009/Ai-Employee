@@ -48,7 +48,19 @@ export function useCreateConnector() {
       name: string;
       config: { baseUrl: string; projectPath?: string };
       token: string;
+      webhookSecret?: string;
     }) => api.post<Connector>("/connectors", input),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["connectors"] }),
+  });
+}
+
+export function useRotateWebhookSecret() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      api.post<{ secret: string; hint: string; family: string | null; header: string }>(
+        `/connectors/${id}/webhook-secret`,
+      ),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["connectors"] }),
   });
 }

@@ -10,11 +10,13 @@ class CreateConnectorDto {
   @IsString() name!: string;
   @IsObject() config!: Record<string, unknown>;
   @IsString() token!: string;
+  @IsOptional() @IsString() webhookSecret?: string;
 }
 class UpdateConnectorDto {
   @IsOptional() @IsString() name?: string;
   @IsOptional() @IsObject() config?: Record<string, unknown>;
   @IsOptional() @IsString() token?: string;
+  @IsOptional() @IsString() webhookSecret?: string;
 }
 
 @ApiTags("connectors")
@@ -48,6 +50,13 @@ export class ConnectorsController {
   @Post(":id/test")
   test(@Ctx() ctx: RequestContext, @Param("id") id: string) {
     return this.connectors.test(ctx.tenantId, id);
+  }
+
+  /** Generate a new inbound-webhook secret. Returns the plaintext once — copy it into GitHub/GitLab now. */
+  @Post(":id/webhook-secret")
+  @RequireCapability("connector:write")
+  rotateWebhookSecret(@Ctx() ctx: RequestContext, @Param("id") id: string) {
+    return this.connectors.rotateWebhookSecret(ctx.tenantId, id);
   }
 
   @Get(":id/repos")
