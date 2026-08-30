@@ -20,6 +20,19 @@
 | **HITL / Approvals** (new): plan-approval gate blocks a Run, `reject` with no note → 400, `approve` resumes the run to `succeeded`, `reject` (with note) fails it as `plan_rejected` with the note surfaced as the failure message | ✅ all four paths verified live via the API |
 | Dashboard (`:8080`) served through nginx, proxies `/api/*` including SSE | ✅ 200, login round-trips to core |
 
+## Verified on this machine (2026-08-30) — review-fix round, audit log, last screens
+
+| Check | Result |
+|-------|--------|
+| Agent: a `fail` review verdict on a non-empty diff triggers one fix round (implementStep w/ findings → re-test → re-review) | ✅ conditional — no cost on a clean pass |
+| `analyzeRepo` detects node / python / **go / rust / java-maven / java-gradle / ruby / Django / Makefile** with the right test + build command | ✅ 5 new stack unit tests |
+| **Hash-chained audit log** — `AuditInterceptor` records every successful mutation (actor, method+route, redacted summary); `sha256(prevHash + canonical-JSON)` per tenant | ✅ live |
+| `GET /audit/verify` walks the chain | ✅ 4-entry chain → `ok`; tampering a stored row → `brokenAt: N` |
+| `/audit` screen (tenant:admin) — filterable table + live "chain verified / broken" badge | ✅ serves 200 |
+| `/agents` screen — agent roles → resolved model, approval-gate flags, tool-policy table, per-project policy | ✅ serves 200 |
+| **All prd/12 dashboard screens built** — sidebar Roadmap section removed | ✅ |
+| 97/97 core tests | ✅ |
+
 ## Verified on this machine (2026-08-30) — free-tier frugality + working key
 
 | Check | Result |
