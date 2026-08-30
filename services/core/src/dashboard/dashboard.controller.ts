@@ -29,4 +29,9 @@ export class DashboardController {
   workload(@Ctx() ctx: RequestContext) {
     return this.dash.workload(ctx.tenantId);
   }
+
+  @Get('system')
+  system(@Ctx() ctx: RequestContext) {
+    return this.dash.system(ctx.tenantId);
+  }
 }

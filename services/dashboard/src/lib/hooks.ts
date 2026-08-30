@@ -12,6 +12,7 @@ import type {
   DashActivity,
   DashBucket,
   DashOverview,
+  DashSystem,
   DashWorkload,
   ModelCall,
   Page,
@@ -33,6 +34,17 @@ const keys = {
 
 export function useProjects() {
   return useQuery({ queryKey: keys.projects, queryFn: () => api.get<Project[]>("/projects") });
+}
+
+export function useUpdateProject() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (i: { id: string; patch: Partial<Project> }) => api.patch<Project>(`/projects/${i.id}`, i.patch),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: keys.projects });
+      qc.invalidateQueries({ queryKey: ["work-items"] });
+    },
+  });
 }
 
 // ---------- connectors ----------
@@ -194,6 +206,14 @@ export function useDashWorkload() {
     queryKey: ["dashboard", "workload"],
     queryFn: () => api.get<DashWorkload>("/dashboard/workload"),
     refetchInterval: 15000,
+  });
+}
+
+export function useDashSystem() {
+  return useQuery({
+    queryKey: ["dashboard", "system"],
+    queryFn: () => api.get<DashSystem>("/dashboard/system"),
+    refetchInterval: 10000,
   });
 }
 

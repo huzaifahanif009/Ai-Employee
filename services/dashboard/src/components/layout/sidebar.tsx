@@ -2,13 +2,16 @@
 
 import {
   Activity,
+  BarChart3,
   Boxes,
   BrainCircuit,
   CheckSquare,
+  FolderGit2,
   LayoutGrid,
   ListTodo,
   Network,
   Plug,
+  ServerCog,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -22,15 +25,18 @@ const MAIN: NavItem[] = [
   { href: "/runs", label: "Runs", icon: Activity },
   { href: "/approvals", label: "Approvals", icon: CheckSquare },
   { href: "/work-items", label: "Work Items", icon: ListTodo },
+  { href: "/analytics", label: "Analytics", icon: BarChart3 },
 ];
 
 const SYSTEM: NavItem[] = [
+  { href: "/projects", label: "Projects", icon: FolderGit2 },
   { href: "/integrations", label: "Integrations", icon: Plug },
   { href: "/ai", label: "AI Providers", icon: BrainCircuit },
+  { href: "/system", label: "System Health", icon: ServerCog },
   { href: "/architecture", label: "Architecture", icon: Network },
 ];
 
-const SOON = ["Projects", "Agents & Policies", "Analytics", "System Health", "Audit Log"];
+const SOON = ["Agents & Policies", "Audit Log"];
 
 function NavLink({ item, pathname, badge }: { item: NavItem; pathname: string; badge?: number }) {
   const { href, label, icon: Icon } = item;

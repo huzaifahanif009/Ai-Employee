@@ -1,6 +1,8 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
+import Redis from 'ioredis';
+import { AppConfig, CONFIG } from '../config/config';
 import {
   ApprovalEntity,
   ModelCallEntity,
@@ -37,7 +39,88 @@ export class DashboardService {
     @InjectRepository(ToolCallEntity) private readonly toolCalls: Repository<ToolCallEntity>,
     @InjectRepository(ApprovalEntity) private readonly approvals: Repository<ApprovalEntity>,
     @InjectRepository(WorkItemEntity) private readonly workItems: Repository<WorkItemEntity>,
+    @Inject(CONFIG) private readonly cfg: AppConfig,
+    private readonly ds: DataSource,
   ) {}
+
+  /** service + dependency health for the System screen */
+  async system(tenantId: string) {
+    const t0 = Date.now();
+    let db: { ok: boolean; latencyMs: number };
+    try {
+      const s = Date.now();
+      await this.ds.query('SELECT 1');
+      db = { ok: true, latencyMs: Date.now() - s };
+    } catch {
+      db = { ok: false, latencyMs: Date.now() - t0 };
+    }
+
+    let redis: { ok: boolean; latencyMs: number };
+    const r = new Redis(this.cfg.redisUrl, { maxRetriesPerRequest: 1, lazyConnect: true, connectTimeout: 2000 });
+    try {
+      const s = Date.now();
+      await r.connect();
+      await r.ping();
+      redis = { ok: true, latencyMs: Date.now() - s };
+    } catch {
+      redis = { ok: false, latencyMs: 0 };
+    } finally {
+      r.disconnect();
+    }
+
+    let litellm: { ok: boolean; detail?: string };
+    try {
+      const res = await fetch(`${this.cfg.litellmBaseUrl}/health/liveliness`, { signal: AbortSignal.timeout(2500) });
+      litellm = { ok: res.ok };
+    } catch (e) {
+      litellm = { ok: false, detail: (e as Error).message.slice(0, 80) };
+    }
+
+    const [activeRuns, openApprovals, providers] = await Promise.all([
+      this.runs
+        .createQueryBuilder('r')
+        .where('r.tenantId = :t', { t: tenantId })
+        .andWhere("r.state NOT IN ('succeeded','failed','cancelled','timed_out','queued')")
+        .getCount(),
+      this.approvals.count({ where: { tenantId, state: 'open' } }),
+      this.ds
+        .query(
+          `SELECT p.kind, p.enabled, COUNT(k.id) FILTER (WHERE k.enabled AND k.status = 'valid') AS valid_keys
+           FROM ai_provider p LEFT JOIN ai_provider_key k ON k."providerId" = p.id
+           WHERE p."tenantId" = $1 GROUP BY p.kind, p.enabled`,
+          [tenantId],
+        )
+        .catch(() => [] as { kind: string; enabled: boolean; valid_keys: string }[]),
+    ]);
+
+    return {
+      checkedAt: new Date().toISOString(),
+      services: [
+        { name: 'Core API', ok: true, detail: `run driver: ${this.cfg.runDriver}` },
+        { name: 'PostgreSQL', ok: db.ok, detail: `${db.latencyMs}ms` },
+        { name: 'Redis', ok: redis.ok, detail: redis.ok ? `${redis.latencyMs}ms` : 'unreachable' },
+        { name: 'LiteLLM (stub gateway)', ok: litellm.ok, detail: litellm.detail ?? 'liveliness ok' },
+        {
+          name: 'Model providers',
+          ok: (providers as { valid_keys: string }[]).some((p) => Number(p.valid_keys) > 0),
+          detail:
+            (providers as { kind: string; valid_keys: string }[])
+              .map((p) => `${p.kind}: ${p.valid_keys} valid key(s)`)
+              .join(', ') || 'none configured',
+        },
+      ],
+      config: {
+        runDriver: this.cfg.runDriver,
+        eventBus: this.cfg.eventBusDriver,
+        sandboxBackend: this.cfg.sandboxBackend,
+        requirePlanApproval: this.cfg.requirePlanApproval,
+        requireDeliveryApproval: this.cfg.requireDeliveryApproval,
+        webhookRequireSignature: this.cfg.webhookRequireSignature,
+        agentLoop: this.cfg.agentLoop,
+      },
+      load: { activeRuns, openApprovals },
+    };
+  }
 
   private since(hours: number) {
     return new Date(Date.now() - hours * 3600_000);

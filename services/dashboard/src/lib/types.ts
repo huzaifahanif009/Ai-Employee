@@ -185,6 +185,13 @@ export interface DashWorkload {
   byOutcome: { state: string; count: number }[];
 }
 
+export interface DashSystem {
+  checkedAt: string;
+  services: { name: string; ok: boolean; detail: string }[];
+  config: Record<string, string | boolean>;
+  load: { activeRuns: number; openApprovals: number };
+}
+
 export interface Page<T> {
   data: T[];
   nextCursor: string | null;

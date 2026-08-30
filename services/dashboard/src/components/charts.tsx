@@ -126,6 +126,68 @@ export function BarList({
   );
 }
 
+/** multi-series time chart (stacked-ish area + lines) */
+export function TimeChart({
+  points,
+  series,
+  height = 200,
+  yFormat = (n) => String(n),
+}: {
+  points: { t: string }[];
+  series: { key: string; label: string; color: string; type?: "area" | "line" }[];
+  height?: number;
+  yFormat?: (n: number) => string;
+}) {
+  const gid = useId();
+  const w = 720;
+  const padL = 44;
+  const padB = 22;
+  const padT = 10;
+  const innerW = w - padL - 8;
+  const innerH = height - padB - padT;
+  const rows = points as Record<string, number | string>[];
+  const n = Math.max(rows.length, 2);
+  const allVals = series.flatMap((s) => rows.map((r) => Number(r[s.key]) || 0));
+  const max = Math.max(...allVals, 1);
+  const x = (i: number) => padL + (i / (n - 1)) * innerW;
+  const y = (v: number) => padT + innerH - (v / max) * innerH;
+
+  const gridY = [0, 0.25, 0.5, 0.75, 1];
+
+  return (
+    <svg viewBox={`0 0 ${w} ${height}`} className="w-full" style={{ maxHeight: height }}>
+      <defs>
+        {series.map((s) => (
+          <linearGradient key={s.key} id={`tc-${gid}-${s.key}`} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={s.color} stopOpacity="0.25" />
+            <stop offset="100%" stopColor={s.color} stopOpacity="0" />
+          </linearGradient>
+        ))}
+      </defs>
+      {gridY.map((g, i) => (
+        <g key={i}>
+          <line x1={padL} x2={w - 8} y1={padT + innerH * (1 - g)} y2={padT + innerH * (1 - g)} stroke="var(--line)" strokeWidth="1" />
+          <text x={padL - 6} y={padT + innerH * (1 - g) + 3} textAnchor="end" className="fill-[var(--muted-2)] text-[9px]">
+            {yFormat(Math.round(max * g))}
+          </text>
+        </g>
+      ))}
+      {series.map((s) => {
+        const pts = rows.map((r, i) => [x(i), y(Number(r[s.key]) || 0)] as const);
+        const line = pts.map(([px, py], i) => `${i ? "L" : "M"}${px.toFixed(1)} ${py.toFixed(1)}`).join(" ");
+        return (
+          <g key={s.key}>
+            {(s.type ?? "area") === "area" && (
+              <path d={`${line} L${x(n - 1)} ${padT + innerH} L${padL} ${padT + innerH} Z`} fill={`url(#tc-${gid}-${s.key})`} />
+            )}
+            <path d={line} fill="none" stroke={s.color} strokeWidth="1.75" strokeLinejoin="round" strokeLinecap="round" />
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
 /** thin progress bar 0..1 */
 export function Meter({ value, tone = "accent" }: { value: number; tone?: "accent" | "ok" | "warn" | "err" }) {
   const col = { accent: "var(--accent)", ok: "var(--ok)", warn: "var(--warn)", err: "var(--err)" }[tone];

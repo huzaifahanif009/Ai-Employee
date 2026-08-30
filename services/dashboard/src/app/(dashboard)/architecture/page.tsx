@@ -24,7 +24,7 @@ import { cn } from "@/lib/utils";
 /* ─────────────────────────────────────────────────────────────────────────────
    This screen is a living map of the ACTUAL implementation. Per the team rule
    it is updated in the same change as any phase / feature / API / schema shift.
-   Last synced: 2026-08-30 — persisted run plans, per-step drill-down, dashboard aggregation API.
+   Last synced: 2026-08-30 — Analytics / Projects / System Health screens, 429 retry-backoff.
    ──────────────────────────────────────────────────────────────────────────── */
 
 type Node = {
@@ -53,9 +53,9 @@ const TIERS: { title: string; nodes: Node[] }[] = [
         detail: {
           what: "Operator console. Talks to Core directly (CORS open) — no reverse proxy, so SSE/WS are never buffered.",
           points: [
-            "Screens: Overview, Runs, Run detail, Approvals, Work Items, Integrations, AI Providers, Architecture",
+            "Screens: Overview, Runs (+ per-step drill-down), Approvals, Work Items, Analytics, Projects, Integrations, AI Providers, System Health, Architecture",
             "TanStack Query for REST, native EventSource for run/fleet streams, native WebSocket for control",
-            "Tailwind v4 tokens, dark-first, light/system themes, @praxis/event-schemas as the shared event catalog",
+            "Tailwind v4 tokens, dark-first, light/system themes, hand-rolled SVG charts, @praxis/event-schemas as the shared event catalog",
           ],
           tech: ["next", "react", "@tanstack/react-query", "tailwindcss v4", "radix"],
         },
@@ -133,7 +133,7 @@ const TIERS: { title: string; nodes: Node[] }[] = [
         icon: Zap,
         tone: "accent",
         detail: {
-          what: "Resolves the tenant's model + key, calls the provider adapter directly, and falls back to the always-on stub when no valid key resolves.",
+          what: "Resolves the tenant's model + key, calls the provider adapter directly (with bounded retry on 429 / 5xx — honours Gemini's 'retry in Ns'), and falls back to the always-on stub when no valid key resolves.",
           points: [
             "AiRegistryService.resolve(modelHint | routingClass | purpose)",
             "Redacts every active provider secret from prompts before the call",
@@ -403,7 +403,8 @@ const LIFECYCLE: Stage[] = [
 const API_SURFACE: { group: string; routes: string[] }[] = [
   { group: "Auth", routes: ["POST /auth/login", "POST /auth/refresh", "GET /auth/me"] },
   { group: "Runs", routes: ["GET /runs  (?workItemId= filter)", "GET /runs/:id  (incl. run.plan)", "POST /runs", "POST /runs/:id/{pause,resume,cancel,comment}", "GET /runs/:id/{steps,events,model-calls,tool-calls}"] },
-  { group: "Dashboard", routes: ["GET /dashboard/overview", "GET /dashboard/timeseries?hours=", "GET /dashboard/activity?limit=", "GET /dashboard/workload"] },
+  { group: "Dashboard", routes: ["GET /dashboard/overview", "GET /dashboard/timeseries?hours=", "GET /dashboard/activity?limit=", "GET /dashboard/workload", "GET /dashboard/system"] },
+  { group: "Projects", routes: ["GET /projects", "GET /projects/:id/readiness", "PATCH /projects/:id", "POST /projects/:id/archive"] },
   { group: "Approvals", routes: ["GET /approvals", "POST /approvals/:id/decision  { decision, note?, payload? }", "payload.editedPlan → run follows the human-edited plan"] },
   { group: "Work items / Intake", routes: ["GET/POST /work-items", "POST /projects/:id/intake/sync", "POST /webhooks/in/:connectorId (signed, public)"] },
   { group: "Connectors", routes: ["GET/POST/PATCH/DELETE /connectors", "POST /connectors/:id/{test,webhook-secret}", "GET /connectors/:id/repos"] },
