@@ -20,6 +20,17 @@
 | **HITL / Approvals** (new): plan-approval gate blocks a Run, `reject` with no note → 400, `approve` resumes the run to `succeeded`, `reject` (with note) fails it as `plan_rejected` with the note surfaced as the failure message | ✅ all four paths verified live via the API |
 | Dashboard (`:8080`) served through nginx, proxies `/api/*` including SSE | ✅ 200, login round-trips to core |
 
+## Verified on this machine (2026-08-30) — free-tier frugality + working key
+
+| Check | Result |
+|-------|--------|
+| New Gemini key from a **different GCP project** (711865781759 — fresh free quota) added; project-280609137292 keys removed | ✅ `••••pLag` valid + default |
+| Agent model usage trimmed (smaller repo digest, `fast` routing for plan/review, slim plan-retry, model-review skipped for trivial diffs) | ✅ no quality regression |
+| Full calculator run on the new key | ✅ 4-step plan, all steps wrote real code, **MR !14**, 8 model calls / ~19.5k tokens / $0.0034 |
+| 89/89 core tests | ✅ |
+
+**Free-tier tip:** the Gemini free allowance is per-GCP-project (~20 req/min + a daily cap on `gemini-3.6-flash`). When a project is exhausted, create a key in a new project and swap it in on the AI Providers screen (add → set default → delete old). Keep runs spaced out; the Model Router's 429 retry-backoff covers brief per-minute limits.
+
 ## Verified on this machine (2026-08-30) — Analytics / Projects / System Health + 429 retry
 
 | Check | Result |
