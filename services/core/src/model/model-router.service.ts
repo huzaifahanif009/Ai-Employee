@@ -134,11 +134,13 @@ export class ModelRouterService implements ModelRouter {
 
     const attempts: RouteAttempt[] = [];
 
-    // 1) configured provider (direct)
+    // 1) configured provider (direct) — retry transient errors (esp. 429 rate limits)
     if (resolved) {
       const started = Date.now();
       try {
-        const response = await this.callDirect(resolved, redacted, req, maxOut, priceIn, priceOut, t0);
+        const response = await this.callDirectWithRetry(
+          resolved, redacted, req, maxOut, priceIn, priceOut, t0,
+        );
         attempts.push({ provider: resolved.providerKind, model: resolved.providerModel, attempt: 1, outcome: "ok", latencyMs: Date.now() - started });
         response.routing = { attempts, cacheHit: null };
         if (cacheKey) await this.redis.set(cacheKey, JSON.stringify(response), "EX", req.cache?.ttlSeconds ?? 900).catch(() => undefined);
@@ -181,6 +183,59 @@ export class ModelRouterService implements ModelRouter {
   }
 
   // ---------------------------------------------------------------------------
+
+  /**
+   * Wrap callDirect with bounded retry on transient errors. 429s from Gemini's
+   * free tier carry "Please retry in Ns" — we honour it (capped) so a burst of
+   * agent calls rides through the per-minute limit instead of degrading to stub.
+   */
+  private async callDirectWithRetry(
+    resolved: ResolvedModel,
+    messages: { role: string; content: string }[],
+    req: ModelRequest,
+    maxOut: number,
+    priceIn: number,
+    priceOut: number,
+    t0: number,
+  ): Promise<ModelResponse> {
+    const MAX_ATTEMPTS = 3;
+    const HARD_CAP_MS = 100_000;
+    const deadline = Date.now() + HARD_CAP_MS;
+    let lastErr: unknown;
+
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      try {
+        return await this.callDirect(resolved, messages, req, maxOut, priceIn, priceOut, t0);
+      } catch (err) {
+        lastErr = err;
+        const status = (err as { status?: number }).status ?? 0;
+        const retryable = status === 429 || status === 408 || status === 425 || (status >= 500 && status < 600);
+        if (!retryable || attempt === MAX_ATTEMPTS) throw err;
+
+        const msg = (err as Error).message ?? "";
+        const m = msg.match(/retry in ([\d.]+)\s*s/i);
+        const suggested = m ? Math.ceil(parseFloat(m[1]) * 1000) + 1000 : 0;
+        const backoff = suggested || Math.min(8000 * 2 ** (attempt - 1), 30_000);
+        if (Date.now() + backoff > deadline) throw err;
+
+        if (req.attribution.runId) {
+          await this.events.append({
+            tenantId: req.attribution.tenantId,
+            runId: req.attribution.runId,
+            type: "progress.warning",
+            payload: {
+              runId: req.attribution.runId,
+              kind: "model_rate_limited",
+              evidence: `${resolved.providerModel} ${status} — retry ${attempt}/${MAX_ATTEMPTS} in ${Math.round(backoff / 1000)}s`,
+            },
+          }).catch(() => undefined);
+        }
+        this.log.warn(`model ${resolved.providerModel} ${status} — retry ${attempt}/${MAX_ATTEMPTS} in ${backoff}ms`);
+        await new Promise((r) => setTimeout(r, backoff));
+      }
+    }
+    throw lastErr;
+  }
 
   private async callDirect(
     resolved: ResolvedModel,
