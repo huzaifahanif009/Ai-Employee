@@ -25,12 +25,14 @@ export class RunsController {
   list(
     @Ctx() ctx: RequestContext,
     @Query('projectId') projectId?: string,
+    @Query('workItemId') workItemId?: string,
     @Query('state') state?: string,
     @Query('limit') limit?: string,
     @Query('cursor') cursor?: string,
   ) {
     return this.runs.list(ctx.tenantId, {
       projectId,
+      workItemId,
       state: state ? state.split(',') : undefined,
       limit: limit ? Number(limit) : undefined,
       cursor,
@@ -40,6 +42,11 @@ export class RunsController {
   @Get(':id')
   get(@Ctx() ctx: RequestContext, @Param('id') id: string) {
     return this.runs.get(ctx.tenantId, id);
+  }
+
+  @Get(':id/steps')
+  steps(@Ctx() ctx: RequestContext, @Param('id') id: string) {
+    return this.runs.steps(ctx.tenantId, id);
   }
 
   @Get(':id/events')

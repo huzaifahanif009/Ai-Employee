@@ -10,6 +10,7 @@ import { Connector1725300000000 } from './migrations/1725300000000-connector';
 import { Tracker1725400000000 } from './migrations/1725400000000-tracker';
 import { AiProviders1725500000000 } from './migrations/1725500000000-ai-providers';
 import { WebhookSecret1725600000000 } from './migrations/1725600000000-webhook-secret';
+import { RunPlan1725700000000 } from './migrations/1725700000000-run-plan';
 
 const cfg = loadConfig();
 
@@ -26,6 +27,7 @@ export const AppDataSource = new DataSource({
     Tracker1725400000000,
     AiProviders1725500000000,
     WebhookSecret1725600000000,
+    RunPlan1725700000000,
   ],
   migrationsRun: false,
   synchronize: false,

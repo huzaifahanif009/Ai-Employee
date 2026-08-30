@@ -10,6 +10,7 @@ import { AuthGuard } from './auth/auth.guard';
 import { AiModule } from './ai/ai.module';
 import { ApprovalsModule } from './approvals/approvals.module';
 import { ConnectorsModule } from './connectors/connectors.module';
+import { DashboardModule } from './dashboard/dashboard.module';
 import { ProblemDetailsFilter } from './common/problem-details.filter';
 import { EventsModule } from './events/events.module';
 import { HealthController } from './health/health.controller';
@@ -49,6 +50,7 @@ import { WorkItemsModule } from './work-items/work-items.module';
     ToolsModule,
     RunsModule,
     IntakeModule,
+    DashboardModule,
   ],
   controllers: [HealthController],
   providers: [

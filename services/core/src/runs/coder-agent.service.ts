@@ -173,8 +173,20 @@ export class CoderAgentService {
       `\nREPOSITORY CONTEXT:\n${repo.digest}`,
     ].join("\n");
 
-    const raw = await ask({ purpose: "plan", routingClass: "strong", system, user, json: true, maxOutputTokens: 2000 });
-    const parsed = extractJson<Partial<AgentPlan>>(raw);
+    let raw = await ask({ purpose: "plan", routingClass: "strong", system, user, json: true, maxOutputTokens: 3200 });
+    let parsed = extractJson<Partial<AgentPlan>>(raw);
+    if (!parsed?.steps?.some((s) => Array.isArray(s?.files) && s.files.length)) {
+      // one retry with a firmer nudge — the first reply had no usable steps
+      raw = await ask({
+        purpose: "plan",
+        routingClass: "strong",
+        system,
+        user: user + "\n\nReturn 2-5 steps. Every step MUST list at least one concrete file path.",
+        json: true,
+        maxOutputTokens: 3200,
+      });
+      parsed = extractJson<Partial<AgentPlan>>(raw) ?? parsed;
+    }
     const steps = (parsed?.steps ?? [])
       .slice(0, MAX_STEPS)
       .map((s, i) => ({

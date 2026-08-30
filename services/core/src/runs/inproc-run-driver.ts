@@ -121,8 +121,13 @@ export class InprocRunDriver {
       await emit('run.totals_updated', { runId, ...run.totals });
     };
 
+    /** canonical per-step id used across events + both ledgers */
+    const sid = (index: string | number | undefined) =>
+      index === undefined ? undefined : `${runId}-s${index}`;
+
     /** one metered model call through the Model Router; returns the reply text */
     const ask: AskFn = async ({ purpose, routingClass, system, user, maxOutputTokens, json, stepId }) => {
+      const runStepId = sid(stepId);
       try {
         const res = await this.modelRouter.complete({
           purpose,
@@ -137,7 +142,7 @@ export class InprocRunDriver {
             tenantId,
             projectId,
             runId,
-            stepId,
+            stepId: runStepId,
             agentRole: purpose === 'review' ? 'reviewer' : purpose === 'plan' ? 'planner' : 'coder',
           },
         });
@@ -148,9 +153,39 @@ export class InprocRunDriver {
         return res.content.map((p) => ('text' in p ? p.text : '')).join('');
       } catch (err) {
         this.log.warn(`model call (${purpose}) failed: ${(err as Error).message}`);
-        await emit('progress.warning', { runId, stepId, kind: 'model_call_failed', evidence: (err as Error).message });
+        await emit('progress.warning', { runId, stepId: runStepId, kind: 'model_call_failed', evidence: (err as Error).message });
         return '';
       }
+    };
+
+    /** persist the plan onto the run row so it's readable per-ticket */
+    const persistPlan = async (
+      steps: AgentStep[],
+      meta: { summary: string; risk: 'low' | 'medium' | 'high'; greenfield: boolean; edited: boolean; editedBy?: string | null },
+    ) => {
+      const run = await this.runs.findOneByOrFail({ id: runId });
+      run.plan = {
+        summary: meta.summary,
+        risk: meta.risk,
+        greenfield: meta.greenfield,
+        edited: meta.edited,
+        editedBy: meta.editedBy ?? null,
+        source: meta.edited ? 'human' : 'agent',
+        createdAt: new Date().toISOString(),
+        steps: steps.map((s) => ({
+          index: s.index, title: s.title, rationale: s.rationale, files: s.files, kind: s.kind, state: 'pending',
+        })),
+      };
+      await this.runs.save(run);
+    };
+
+    /** record a step's outcome back onto run.plan */
+    const recordStep = async (index: number, state: 'succeeded' | 'no_changes' | 'failed', filesWritten: string[]) => {
+      const run = await this.runs.findOneBy({ id: runId });
+      if (!run?.plan) return;
+      const s = run.plan.steps.find((x) => x.index === index);
+      if (s) { s.state = state; s.filesWritten = filesWritten; }
+      await this.runs.save(run);
     };
 
     const repoDir = `${this.cfg.sandboxWorkdir}/repo`;
@@ -233,6 +268,7 @@ export class InprocRunDriver {
           planId: `plan-${runId}`, index: s.index, title: s.title, files: s.files, kind: s.kind, riskTier: 'notify',
         });
       }
+      await persistPlan(steps, { summary: plan.summary, risk: plan.risk, greenfield: repoCtx.greenfield, edited: false });
 
       // ── plan approval gate (editable) ────────────────────────────────────
       if (this.cfg.requirePlanApproval) {
@@ -258,6 +294,10 @@ export class InprocRunDriver {
           const next = this.coder.sanitizePlan(edited);
           if (next.length) {
             steps = next;
+            await persistPlan(steps, {
+              summary: plan.summary, risk: plan.risk, greenfield: repoCtx.greenfield,
+              edited: true, editedBy: decision.decidedBy,
+            });
             await emit('progress.warning', { runId, kind: 'plan_edited', evidence: `${steps.length} steps after human edit` });
           }
         }
@@ -268,27 +308,30 @@ export class InprocRunDriver {
       const changed = new Set<string>();
       for (const s of steps) {
         if (control.cancelled) return this.finishCancelled(runId, tenantId);
-        const stepId = `${runId}-s${s.index}`;
+        const stepId = sid(s.index)!;
         await emit('run_step.started', { runId, stepId, index: s.index, role: 'coder', title: s.title });
 
         const files = await this.coder.implementStep(ask, io, s, wi, repoCtx);
-        let wrote = 0;
+        const stepFiles: string[] = [];
         for (const f of files) {
           if (f.action === 'delete') {
             const r = await tool('shell.exec', { command: `rm -f ${shq(f.path)}` }, stepId);
-            if (r.status === 'ok') { changed.add(f.path); wrote++; }
+            if (r.status === 'ok') { changed.add(f.path); stepFiles.push(f.path); }
             continue;
           }
           const r = await tool('fs.write', { path: f.path, content: f.content }, stepId);
-          if (r.status === 'ok') { changed.add(f.path); wrote++; }
+          if (r.status === 'ok') { changed.add(f.path); stepFiles.push(f.path); }
           else await emit('progress.warning', { runId, stepId, kind: 'write_rejected', evidence: `${f.path}: ${r.outputPreview}` });
         }
         await emit('message.delta', {
           runId, stepId, role: 'coder',
-          deltaText: wrote ? `${s.title} — wrote ${files.map((f) => f.path).join(', ')}. ` : `${s.title} — no file changes. `,
+          deltaText: stepFiles.length ? `${s.title} — wrote ${stepFiles.join(', ')}. ` : `${s.title} — no file changes. `,
         });
         await tool('git.add', {}, stepId);
-        await emit('run_step.finished', { runId, stepId, state: wrote ? 'succeeded' : 'no_changes', filesWritten: wrote });
+        await emit('run_step.finished', {
+          runId, stepId, state: stepFiles.length ? 'succeeded' : 'no_changes', filesWritten: stepFiles.length,
+        });
+        await recordStep(s.index, stepFiles.length ? 'succeeded' : 'no_changes', stepFiles);
       }
       await bump({ filesChanged: changed.size });
 
@@ -323,7 +366,7 @@ export class InprocRunDriver {
           };
           const fixes = await this.coder.implementStep(ask, io, failStep, wi, repoCtx);
           for (const f of fixes) {
-            const r = await tool('fs.write', { path: f.path, content: f.content }, `${runId}-fix`);
+            const r = await tool('fs.write', { path: f.path, content: f.content }, sid(failStep.index));
             if (r.status === 'ok') changed.add(f.path);
           }
           await tool('git.add', {});

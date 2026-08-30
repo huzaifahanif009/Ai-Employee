@@ -4,7 +4,7 @@ import { notFound, PraxisError } from '@praxis/contracts';
 import { RunFailureCategory, RunState } from '@praxis/event-schemas';
 import { Repository } from 'typeorm';
 import { AppConfig, CONFIG } from '../config/config';
-import { RunEntity, WorkItemEntity } from '../database/entities';
+import { ModelCallEntity, RunEntity, ToolCallEntity, WorkItemEntity } from '../database/entities';
 import { RunEventsService } from '../events/run-events.service';
 import { RequestContext } from '../common/request-context';
 import { assertTransition, isTerminal } from './run-state-machine';
@@ -25,13 +25,84 @@ export class RunsService {
     @Inject(CONFIG) private readonly cfg: AppConfig,
     @InjectRepository(RunEntity) private readonly runs: Repository<RunEntity>,
     @InjectRepository(WorkItemEntity) private readonly workItems: Repository<WorkItemEntity>,
+    @InjectRepository(ModelCallEntity) private readonly modelCalls: Repository<ModelCallEntity>,
+    @InjectRepository(ToolCallEntity) private readonly toolCalls: Repository<ToolCallEntity>,
     private readonly events: RunEventsService,
     private readonly inproc: InprocRunDriver,
   ) {}
 
+  /** Per-step drill-down: the plan step + every model/tool call attributed to it. */
+  async steps(tenantId: string, id: string) {
+    const run = await this.get(tenantId, id);
+    const [mcs, tcs] = await Promise.all([
+      this.modelCalls.find({ where: { runId: id }, order: { createdAt: 'ASC' } }),
+      this.toolCalls.find({ where: { tenantId, runId: id }, order: { seq: 'ASC' } }),
+    ]);
+
+    const mcView = (m: ModelCallEntity) => ({
+      purpose: m.purpose,
+      provider: m.provider,
+      model: m.model,
+      agentRole: m.agentRole,
+      inputTokens: m.inputTokens,
+      outputTokens: m.outputTokens,
+      costUsd: Number(m.costUsd),
+      latencyMs: m.latencyMs,
+      cacheHit: m.cacheHit,
+      finishReason: m.finishReason,
+      createdAt: m.createdAt,
+    });
+    const tcView = (t: ToolCallEntity) => ({
+      seq: t.seq,
+      toolName: t.toolName,
+      riskTier: t.riskTier,
+      status: t.status,
+      input: t.input,
+      outputPreview: t.outputPreview,
+      durationMs: t.durationMs,
+      error: t.error,
+      createdAt: t.createdAt,
+    });
+
+    const planSteps = run.plan?.steps ?? [];
+    const byStep = (sid: string) => ({
+      modelCalls: mcs.filter((m) => m.runStepId === sid).map(mcView),
+      toolCalls: tcs.filter((t) => t.runStepId === sid).map(tcView),
+    });
+
+    const steps = planSteps.map((s) => {
+      const sid = `${id}-s${s.index}`;
+      const g = byStep(sid);
+      return {
+        index: s.index,
+        title: s.title,
+        rationale: s.rationale ?? '',
+        files: s.files,
+        kind: s.kind,
+        state: s.state ?? 'pending',
+        filesWritten: s.filesWritten ?? [],
+        modelCalls: g.modelCalls,
+        toolCalls: g.toolCalls,
+        costUsd: +g.modelCalls.reduce((a, m) => a + m.costUsd, 0).toFixed(6),
+        tokens: g.modelCalls.reduce((a, m) => a + m.inputTokens + m.outputTokens, 0),
+      };
+    });
+
+    const assignedStepIds = new Set(planSteps.map((s) => `${id}-s${s.index}`));
+    const orphanModel = mcs.filter((m) => !m.runStepId || !assignedStepIds.has(m.runStepId)).map(mcView);
+    const orphanTool = tcs.filter((t) => !t.runStepId || !assignedStepIds.has(t.runStepId)).map(tcView);
+
+    return {
+      runId: id,
+      plan: run.plan,
+      steps,
+      other: { modelCalls: orphanModel, toolCalls: orphanTool },
+    };
+  }
+
   async list(
     tenantId: string,
-    filter: { projectId?: string; state?: string[]; limit?: number; cursor?: string },
+    filter: { projectId?: string; workItemId?: string; state?: string[]; limit?: number; cursor?: string },
   ) {
     const limit = Math.min(filter.limit ?? 50, 200);
     const qb = this.runs
@@ -40,6 +111,7 @@ export class RunsService {
       .orderBy('r.createdAt', 'DESC')
       .take(limit + 1);
     if (filter.projectId) qb.andWhere('r.projectId = :projectId', { projectId: filter.projectId });
+    if (filter.workItemId) qb.andWhere('r.workItemId = :workItemId', { workItemId: filter.workItemId });
     if (filter.state?.length) qb.andWhere('r.state IN (:...state)', { state: filter.state });
     if (filter.cursor) qb.andWhere('r.createdAt < :cursor', { cursor: new Date(filter.cursor) });
     const rows = await qb.getMany();
