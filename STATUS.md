@@ -20,6 +20,18 @@
 | **HITL / Approvals** (new): plan-approval gate blocks a Run, `reject` with no note → 400, `approve` resumes the run to `succeeded`, `reject` (with note) fails it as `plan_rejected` with the note surfaced as the failure message | ✅ all four paths verified live via the API |
 | Dashboard (`:8080`) served through nginx, proxies `/api/*` including SSE | ✅ 200, login round-trips to core |
 
+## Verified on this machine (2026-08-30) — Analytics / Projects / System Health + 429 retry
+
+| Check | Result |
+|-------|--------|
+| Model Router retries provider calls on 429 / 5xx (honours Gemini's "retry in Ns", 3 attempts, ~100s cap) before the stub fallback | ✅ rode through multiple 429s live; emits `progress.warning{model_rate_limited}` |
+| `GET /dashboard/system` — live `SELECT 1` / Redis `PING` / LiteLLM liveliness + valid-key count + config flags + load | ✅ pg 3ms, redis 7ms, google 1 valid key |
+| `/analytics` screen — multi-series `TimeChart` (started/succeeded/failed, tokens/hr), 24h/3d/7d range, outcome donut, top models/tools | ✅ serves 200 |
+| `/projects` screen — per-project editor (intake mode, base branch, label allowlist, policy preset) via `PATCH /projects/:id` | ✅ serves 200 |
+| `/system` screen — service health grid + runtime config + load | ✅ serves 200 |
+| sidebar: Projects / Analytics / System Health promoted from Roadmap into nav | ✅ |
+| Second Gemini key added, old exhausted key removed; **project 280609137292 free-tier quota still exhausted** (both keys share it — `limit: 20/min` on gemini-3.6-flash, persistently throttled today) | ⚠️ needs billing / different project / OpenAI-Anthropic key |
+
 ## Verified on this machine (2026-08-30) — agent loop (flag) + resilience
 
 | Check | Result |
