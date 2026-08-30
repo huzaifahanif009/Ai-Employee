@@ -156,8 +156,17 @@ describe('CoderAgentService.review', () => {
   });
   it('normalises a model verdict', async () => {
     const ask = jest.fn().mockResolvedValue(JSON.stringify({ verdict: 'pass', summary: 'lgtm', findings: [] }));
-    const r = await svc.review(ask, wi, 'diff --git a/x b/x');
+    const bigDiff = 'diff --git a/a b/a\n' + '+line\n'.repeat(200);
+    const r = await svc.review(ask, wi, bigDiff);
+    expect(ask).toHaveBeenCalled();
     expect(r).toMatchObject({ verdict: 'pass', summary: 'lgtm' });
+  });
+
+  it('skips the model call for a trivial one-file diff', async () => {
+    const ask = jest.fn();
+    const r = await svc.review(ask, wi, 'diff --git a/x b/x\n+one small line\n');
+    expect(ask).not.toHaveBeenCalled();
+    expect(r.verdict).toBe('pass');
   });
 });
 

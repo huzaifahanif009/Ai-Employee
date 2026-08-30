@@ -119,19 +119,20 @@ export class CoderAgentService {
       "index.html",
       "tsconfig.json",
     ];
+    // frugal: only enough context to orient the planner, not the whole repo
     const extras = codeFiles
       .filter((f) => !pref.includes(f))
       .sort((a, b) => a.length - b.length)
-      .slice(0, 6);
+      .slice(0, 4);
 
     const snippets: string[] = [];
-    let budget = 12_000;
+    let budget = 6_000;
     for (const path of [...pref, ...extras]) {
       if (budget <= 0) break;
       if (!fileTree.includes(path) && !pref.includes(path)) continue;
       const body = await io.readFile(path).catch(() => null);
       if (!body) continue;
-      const clipped = body.length > 4000 ? body.slice(0, 4000) + "\n… (truncated)" : body;
+      const clipped = body.length > 2200 ? body.slice(0, 2200) + "\n… (truncated)" : body;
       snippets.push(`--- ${path} ---\n${clipped}`);
       budget -= clipped.length;
     }
@@ -158,7 +159,7 @@ export class CoderAgentService {
     const digest = [
       `Stack: ${stack}${greenfield ? " (greenfield — repo has no source files yet)" : ""}`,
       `Files (${fileTree.length}):`,
-      fileTree.slice(0, 120).map((f) => `  ${f}`).join("\n") || "  (none)",
+      fileTree.slice(0, 80).map((f) => `  ${f}`).join("\n") || "  (none)",
       "",
       snippets.join("\n\n"),
     ].join("\n");
@@ -193,18 +194,17 @@ export class CoderAgentService {
       `\nREPOSITORY CONTEXT:\n${repo.digest}`,
     ].join("\n");
 
-    let raw = await ask({ purpose: "plan", routingClass: "strong", system, user, json: true, maxOutputTokens: 3200 });
+    let raw = await ask({ purpose: "plan", routingClass: "fast", system, user, json: true, maxOutputTokens: 2600 });
     let parsed = extractJson<Partial<AgentPlan>>(raw);
     if (!parsed?.steps?.some((s) => Array.isArray(s?.files) && s.files.length)) {
-      // one retry with a firmer nudge — the first reply had no usable steps
-      raw = await ask({
-        purpose: "plan",
-        routingClass: "strong",
-        system,
-        user: user + "\n\nReturn 2-5 steps. Every step MUST list at least one concrete file path.",
-        json: true,
-        maxOutputTokens: 3200,
-      });
+      // one retry, firmer + trimmed (no repo snippets) — the first reply had no usable steps
+      const slim =
+        `WORK ITEM: ${workItem.title}\n` +
+        (workItem.acceptanceCriteria?.length ? `CRITERIA: ${workItem.acceptanceCriteria.join("; ")}\n` : "") +
+        `FILES: ${repo.fileTree.slice(0, 40).join(", ") || "(empty repo)"}\n` +
+        `Stack: ${repo.stack}${repo.greenfield ? " greenfield" : ""}\n\n` +
+        "Return 2-5 steps. Every step MUST list at least one concrete file path.";
+      raw = await ask({ purpose: "plan", routingClass: "fast", system, user: slim, json: true, maxOutputTokens: 2600 });
       parsed = extractJson<Partial<AgentPlan>>(raw) ?? parsed;
     }
     const steps = (parsed?.steps ?? [])
@@ -461,19 +461,22 @@ export class CoderAgentService {
         findings: [{ severity: "error", message: "The diff is empty — nothing was implemented." }],
       };
     }
+    // frugal: skip the model call for a trivial diff — a heuristic pass is enough
+    const changedFiles = (diff.match(/^diff --git /gm) ?? []).length;
+    if (changedFiles <= 1 && diff.length < 600) {
+      return { verdict: "pass", summary: "Trivial change — auto-approved without a model review.", findings: [] };
+    }
     const system =
       "You are reviewing a pull request diff against its work item. Respond ONLY with JSON: " +
       `{"verdict": "pass"|"warn"|"fail", "summary": string, "findings": [{"severity": "info"|"warn"|"error", "message": string}]}. ` +
-      "`fail` only for missing core functionality or broken code. `warn` for gaps worth noting. Be concise.";
+      "`fail` only for missing core functionality or broken code. `warn` for gaps worth noting. Be terse — 1-line summary, at most 3 findings.";
     const user = [
       `WORK ITEM: ${workItem.title}`,
-      workItem.acceptanceCriteria?.length
-        ? `ACCEPTANCE CRITERIA:\n${workItem.acceptanceCriteria.map((c) => `- ${c}`).join("\n")}`
-        : "",
-      `\nDIFF:\n${diff.length > 18_000 ? diff.slice(0, 18_000) + "\n… (truncated)" : diff}`,
+      workItem.acceptanceCriteria?.length ? `CRITERIA: ${workItem.acceptanceCriteria.join("; ")}` : "",
+      `\nDIFF:\n${diff.length > 9_000 ? diff.slice(0, 9_000) + "\n… (truncated)" : diff}`,
     ].join("\n");
 
-    const raw = await ask({ purpose: "review", routingClass: "strong", system, user, json: true, maxOutputTokens: 2200 });
+    const raw = await ask({ purpose: "review", routingClass: "fast", system, user, json: true, maxOutputTokens: 1200 });
     const p = extractJson<Partial<AgentReview>>(raw);
     return {
       verdict: (["pass", "warn", "fail"] as const).includes(p?.verdict as never) ? (p!.verdict as AgentReview["verdict"]) : "warn",
