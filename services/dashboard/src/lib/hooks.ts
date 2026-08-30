@@ -8,6 +8,7 @@ import type {
   AiProviderKey,
   Approval,
   ApprovalDecision,
+  AuditEntry,
   Connector,
   DashActivity,
   DashBucket,
@@ -214,6 +215,25 @@ export function useDashSystem() {
     queryKey: ["dashboard", "system"],
     queryFn: () => api.get<DashSystem>("/dashboard/system"),
     refetchInterval: 10000,
+  });
+}
+
+export function useAuditLog(action?: string) {
+  return useQuery({
+    queryKey: ["audit", action ?? "all"],
+    queryFn: () =>
+      api.get<{ data: AuditEntry[]; nextCursor: string | null }>(
+        `/audit?limit=80${action ? `&action=${encodeURIComponent(action)}` : ""}`,
+      ),
+    refetchInterval: 10000,
+  });
+}
+
+export function useAuditVerify() {
+  return useQuery({
+    queryKey: ["audit", "verify"],
+    queryFn: () => api.get<{ ok: boolean; entries: number; brokenAt: number | null }>("/audit/verify"),
+    refetchInterval: 30000,
   });
 }
 

@@ -11,6 +11,7 @@ import {
   ListTodo,
   Network,
   Plug,
+  ScrollText,
   ServerCog,
 } from "lucide-react";
 import Link from "next/link";
@@ -32,11 +33,12 @@ const SYSTEM: NavItem[] = [
   { href: "/projects", label: "Projects", icon: FolderGit2 },
   { href: "/integrations", label: "Integrations", icon: Plug },
   { href: "/ai", label: "AI Providers", icon: BrainCircuit },
+  { href: "/audit", label: "Audit Log", icon: ScrollText },
   { href: "/system", label: "System Health", icon: ServerCog },
   { href: "/architecture", label: "Architecture", icon: Network },
 ];
 
-const SOON = ["Agents & Policies", "Audit Log"];
+const SOON = ["Agents & Policies"];
 
 function NavLink({ item, pathname, badge }: { item: NavItem; pathname: string; badge?: number }) {
   const { href, label, icon: Icon } = item;

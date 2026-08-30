@@ -192,6 +192,16 @@ export interface DashSystem {
   load: { activeRuns: number; openApprovals: number };
 }
 
+export interface AuditEntry {
+  id: string;
+  ts: string;
+  actor: { kind: string; id: string; display?: string };
+  action: string;
+  target: Record<string, unknown>;
+  after: Record<string, unknown> | null;
+  hash: string;
+}
+
 export interface Page<T> {
   data: T[];
   nextCursor: string | null;

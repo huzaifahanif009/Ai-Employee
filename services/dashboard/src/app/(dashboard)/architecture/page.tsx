@@ -405,6 +405,7 @@ const API_SURFACE: { group: string; routes: string[] }[] = [
   { group: "Runs", routes: ["GET /runs  (?workItemId= filter)", "GET /runs/:id  (incl. run.plan)", "POST /runs", "POST /runs/:id/{pause,resume,cancel,comment}", "GET /runs/:id/{steps,events,model-calls,tool-calls}"] },
   { group: "Dashboard", routes: ["GET /dashboard/overview", "GET /dashboard/timeseries?hours=", "GET /dashboard/activity?limit=", "GET /dashboard/workload", "GET /dashboard/system"] },
   { group: "Projects", routes: ["GET /projects", "GET /projects/:id/readiness", "PATCH /projects/:id", "POST /projects/:id/archive"] },
+  { group: "Audit", routes: ["GET /audit  (tenant:admin)", "GET /audit/verify — walks the hash chain"] },
   { group: "Approvals", routes: ["GET /approvals", "POST /approvals/:id/decision  { decision, note?, payload? }", "payload.editedPlan → run follows the human-edited plan"] },
   { group: "Work items / Intake", routes: ["GET/POST /work-items", "POST /projects/:id/intake/sync", "POST /webhooks/in/:connectorId (signed, public)"] },
   { group: "Connectors", routes: ["GET/POST/PATCH/DELETE /connectors", "POST /connectors/:id/{test,webhook-secret}", "GET /connectors/:id/repos"] },
@@ -420,6 +421,7 @@ const SECURITY: { title: string; body: string }[] = [
   { title: "Prompt safety", body: "Model Router strips every active provider secret + known key patterns from messages; scrubKey scrubs provider-echoed key fragments from stored test details." },
   { title: "Inbound webhooks", body: "GitHub HMAC-SHA256 over the raw body / GitLab shared token, constant-time compare; WEBHOOK_REQUIRE_SIGNATURE rejects unverified deliveries (401 / 403)." },
   { title: "Sandbox", body: "Per-run Docker container, labelled + torn down. Explicitly not an isolation boundary (ADR-0005) — Firecracker/gVisor + egress allowlist are Phase 2." },
+  { title: "Audit trail", body: "Every state-changing request is appended to a per-tenant hash-chained audit_log (prevHash → sha256 over canonical JSON). GET /audit/verify walks the chain and reports any tamper." },
 ];
 
 export default function ArchitecturePage() {
