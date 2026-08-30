@@ -20,6 +20,16 @@
 | **HITL / Approvals** (new): plan-approval gate blocks a Run, `reject` with no note → 400, `approve` resumes the run to `succeeded`, `reject` (with note) fails it as `plan_rejected` with the note surfaced as the failure message | ✅ all four paths verified live via the API |
 | Dashboard (`:8080`) served through nginx, proxies `/api/*` including SSE | ✅ 200, login round-trips to core |
 
+## Verified on this machine (2026-08-30) — agent loop (flag) + resilience
+
+| Check | Result |
+|-------|--------|
+| `CoderAgentService.runStep` — iterative read→search→write→run loop, guardrails (4 turns, 6 actions, path guard, run allowlist, stall bail) | ✅ 4 unit tests; gated by `AGENT_LOOP` (default false) |
+| `AGENT_LOOP=true` on free-tier Gemini Flash | ⚠️ `malformed_function_call` — the action schema triggers Gemini's function-calling path; needs OpenAI/Anthropic/paid Gemini |
+| one-shot `implementStep` retries once on an empty reply; plan fallback synthesises a web scaffold; greenfield writes a minimal `package.json` when tests exist | ✅ |
+| End-to-end coding run on the current key | ⚠️ **rate-limited** — free-tier Gemini quota exhausted (429 → stub fallback → empty steps). Pipeline itself proven earlier (MR !11, !13). Needs a paid key or quota reset. |
+| 88/88 core tests | ✅ |
+
 ## Verified on this machine (2026-08-30) — deep tracking + chart-rich dashboard
 
 | Check | Result |
