@@ -212,6 +212,22 @@ export class InprocRunDriver {
       },
     };
 
+    /** richer callbacks for the iterative step loop */
+    const stepExec = (stepId: string): import('./coder-agent.service').StepExec => ({
+      ask,
+      read: io.readFile,
+      search: async (query, path) => (await tool('code.search', { query, path: path ?? '.' }, stepId)).outputPreview,
+      write: async (path, content) => {
+        const r = await tool('fs.write', { path, content }, stepId);
+        return { ok: r.status === 'ok', detail: r.outputPreview };
+      },
+      run: async (command) => {
+        const r = await tool('shell.exec', { command }, stepId);
+        return { ok: r.status === 'ok', output: r.outputPreview };
+      },
+      note: async (text) => { await emit('message.delta', { runId, stepId, role: 'coder', deltaText: text + ' ' }); },
+    });
+
     try {
       // ── provision sandbox + clone ─────────────────────────────────────────
       await step('planning');
@@ -311,28 +327,62 @@ export class InprocRunDriver {
         const stepId = sid(s.index)!;
         await emit('run_step.started', { runId, stepId, index: s.index, role: 'coder', title: s.title });
 
-        const files = await this.coder.implementStep(ask, io, s, wi, repoCtx);
         const stepFiles: string[] = [];
-        for (const f of files) {
-          if (f.action === 'delete') {
-            const r = await tool('shell.exec', { command: `rm -f ${shq(f.path)}` }, stepId);
-            if (r.status === 'ok') { changed.add(f.path); stepFiles.push(f.path); }
-            continue;
+        let turns = 1;
+        if (this.cfg.agentLoop) {
+          // iterative read→edit→run loop — needs a model with solid JSON/tool-calling
+          const res = await this.coder.runStep(stepExec(stepId), s, wi, repoCtx);
+          stepFiles.push(...res.filesWritten);
+          turns = res.turns;
+        } else {
+          // one-shot: the model returns the complete new contents for the step's files
+          const files = await this.coder.implementStep(ask, io, s, wi, repoCtx);
+          for (const f of files) {
+            if (f.action === 'delete') {
+              const r = await tool('shell.exec', { command: `rm -f '${f.path.replace(/'/g, `'\\''`)}'` }, stepId);
+              if (r.status === 'ok') stepFiles.push(f.path);
+              continue;
+            }
+            const r = await tool('fs.write', { path: f.path, content: f.content }, stepId);
+            if (r.status === 'ok') stepFiles.push(f.path);
+            else await emit('progress.warning', { runId, stepId, kind: 'write_rejected', evidence: `${f.path}: ${r.outputPreview}` });
           }
-          const r = await tool('fs.write', { path: f.path, content: f.content }, stepId);
-          if (r.status === 'ok') { changed.add(f.path); stepFiles.push(f.path); }
-          else await emit('progress.warning', { runId, stepId, kind: 'write_rejected', evidence: `${f.path}: ${r.outputPreview}` });
         }
+        for (const f of stepFiles) changed.add(f);
+
         await emit('message.delta', {
           runId, stepId, role: 'coder',
           deltaText: stepFiles.length ? `${s.title} — wrote ${stepFiles.join(', ')}. ` : `${s.title} — no file changes. `,
         });
         await tool('git.add', {}, stepId);
         await emit('run_step.finished', {
-          runId, stepId, state: stepFiles.length ? 'succeeded' : 'no_changes', filesWritten: stepFiles.length,
+          runId, stepId, state: stepFiles.length ? 'succeeded' : 'no_changes', filesWritten: stepFiles.length, turns,
         });
         await recordStep(s.index, stepFiles.length ? 'succeeded' : 'no_changes', stepFiles);
       }
+
+      // greenfield: if tests were written but no manifest exists, scaffold one so verify can run
+      if (
+        repoCtx.stack === 'unknown' &&
+        [...changed].some((f) => /(^|\/)(test|tests|spec)\/|\.(test|spec)\.(m?js|ts)$/.test(f)) &&
+        !repoCtx.fileTree.includes('package.json') &&
+        ![...changed].includes('package.json')
+      ) {
+        const pkg = JSON.stringify(
+          { name: 'app', private: true, type: 'module', scripts: { test: 'node --test' } },
+          null,
+          2,
+        );
+        const r = await tool('fs.write', { path: 'package.json', content: pkg });
+        if (r.status === 'ok') {
+          changed.add('package.json');
+          repoCtx.stack = 'node';
+          repoCtx.testCommand = 'npm test --silent';
+          await tool('git.add', {});
+          await emit('progress.warning', { runId, kind: 'scaffolded_manifest', evidence: 'package.json (node --test)' });
+        }
+      }
+
       await bump({ filesChanged: changed.size });
 
       if (changed.size === 0) {
@@ -553,7 +603,6 @@ export class InprocRunDriver {
   }
 }
 
-const shq = (s: string) => `'${String(s).replace(/'/g, `'\\''`)}'`;
 const tail = (s: string, n = 800) => {
   const t = (s ?? '').trim();
   return t.length > n ? '…' + t.slice(-n) : t;

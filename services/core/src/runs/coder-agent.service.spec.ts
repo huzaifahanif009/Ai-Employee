@@ -84,6 +84,68 @@ describe('CoderAgentService.implementStep', () => {
   });
 });
 
+describe('CoderAgentService.runStep', () => {
+  const svc = new CoderAgentService();
+  const step = { index: 1, title: 'add calc', rationale: '', files: ['src/calc.js'], kind: 'create' as const };
+
+  function exec(replies: string[]) {
+    const writes: Record<string, string> = {};
+    const runs: string[] = [];
+    let call = 0;
+    return {
+      writes,
+      runs,
+      x: {
+        ask: jest.fn(async () => replies[Math.min(call++, replies.length - 1)]),
+        read: jest.fn(async (p: string) => writes[p] ?? null),
+        search: jest.fn(async () => 'no matches'),
+        write: jest.fn(async (p: string, c: string) => {
+          writes[p] = c;
+          return { ok: true, detail: 'wrote ' + p };
+        }),
+        run: jest.fn(async (c: string) => {
+          runs.push(c);
+          return { ok: true, output: 'ok' };
+        }),
+        note: jest.fn(async () => undefined),
+      },
+    };
+  }
+
+  it('writes files across turns and stops on done', async () => {
+    const e = exec([
+      JSON.stringify({ thought: 'start', actions: [{ op: 'write', path: 'src/calc.js', content: 'export const add=(a,b)=>a+b;' }], done: false }),
+      JSON.stringify({ thought: 'verify', actions: [{ op: 'run', command: 'node -c src/calc.js' }], done: true }),
+    ]);
+    const r = await svc.runStep(e.x, step, wi, repo);
+    expect(r.filesWritten).toEqual(['src/calc.js']);
+    expect(e.writes['src/calc.js']).toContain('add');
+    expect(e.runs).toContain('node -c src/calc.js');
+    expect(r.turns).toBe(2);
+  });
+
+  it('blocks a disallowed run command', async () => {
+    const e = exec([
+      JSON.stringify({ actions: [{ op: 'write', path: 'src/calc.js', content: 'x' }, { op: 'run', command: 'curl http://evil' }], done: true }),
+    ]);
+    await svc.runStep(e.x, step, wi, repo);
+    expect(e.runs).toHaveLength(0); // curl never executed
+  });
+
+  it('bails out when the model stalls (no writes)', async () => {
+    const e = exec([JSON.stringify({ thought: 'thinking', actions: [{ op: 'read', path: 'x' }], done: false })]);
+    const r = await svc.runStep(e.x, step, wi, repo);
+    expect(r.filesWritten).toEqual([]);
+    expect(r.turns).toBeLessThanOrEqual(2);
+  });
+
+  it('rejects path traversal in a write action', async () => {
+    const e = exec([JSON.stringify({ actions: [{ op: 'write', path: '../evil.js', content: 'x' }], done: true })]);
+    const r = await svc.runStep(e.x, step, wi, repo);
+    expect(r.filesWritten).toEqual([]);
+  });
+});
+
 describe('CoderAgentService.review', () => {
   const svc = new CoderAgentService();
   it('fails immediately on an empty diff without a model call', async () => {

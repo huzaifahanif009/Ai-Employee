@@ -29,6 +29,9 @@ export interface AppConfig {
   /** reject inbound webhooks that fail signature/token verification (prd/09 §5). */
   webhookRequireSignature: boolean;
 
+  /** use the iterative read→edit→run agent loop (needs a model with solid JSON/tool-calling; default off). */
+  agentLoop: boolean;
+
   agentRuntimeUrl: string;
   litellmBaseUrl: string;
   litellmMasterKey: string;
@@ -72,6 +75,7 @@ const schema = Joi.object({
   REQUIRE_PLAN_APPROVAL: Joi.boolean().truthy('true').falsy('false').default(true),
   REQUIRE_DELIVERY_APPROVAL: Joi.boolean().truthy('true').falsy('false').default(false),
   WEBHOOK_REQUIRE_SIGNATURE: Joi.boolean().truthy('true').falsy('false').default(true),
+  AGENT_LOOP: Joi.boolean().truthy('true').falsy('false').default(false),
 
   AGENT_RUNTIME_URL: Joi.string().uri().default('http://localhost:8081'),
   LITELLM_BASE_URL: Joi.string().uri().default('http://localhost:4000'),
@@ -119,6 +123,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     requirePlanApproval: value.REQUIRE_PLAN_APPROVAL,
     requireDeliveryApproval: value.REQUIRE_DELIVERY_APPROVAL,
     webhookRequireSignature: value.WEBHOOK_REQUIRE_SIGNATURE,
+    agentLoop: value.AGENT_LOOP,
     agentRuntimeUrl: value.AGENT_RUNTIME_URL,
     litellmBaseUrl: value.LITELLM_BASE_URL,
     litellmMasterKey: value.LITELLM_MASTER_KEY,

@@ -67,6 +67,26 @@ export interface RepoIo {
   sh: (command: string) => Promise<{ ok: boolean; output: string }>;
 }
 
+/** Callbacks the driver hands to the iterative step loop. */
+export interface StepExec {
+  ask: AskFn;
+  read: (path: string) => Promise<string | null>;
+  search: (query: string, path?: string) => Promise<string>;
+  write: (path: string, content: string) => Promise<{ ok: boolean; detail: string }>;
+  run: (command: string) => Promise<{ ok: boolean; output: string }>;
+  note: (text: string) => Promise<void>;
+}
+
+export interface StepResult {
+  filesWritten: string[];
+  turns: number;
+  notes: string[];
+}
+
+const MAX_TURNS = 4;
+const MAX_ACTIONS = 6;
+const RUN_ALLOW = /^(node |npm |npx |pnpm |yarn |python |python3 |pytest|tsc\b|jest\b|mocha\b|eslint\b|\.\/|ls\b|cat |grep |rg |head |tail |wc |test )/;
+
 const CODE_EXT = /\.(ts|tsx|js|jsx|mjs|cjs|py|go|rs|java|rb|php|c|cc|cpp|h|hpp|cs|html|css|scss|vue|svelte|sql)$/i;
 const MAX_FILE_BYTES = 24_000;
 const MAX_STEPS = 6;
@@ -204,14 +224,25 @@ export class CoderAgentService {
       .filter((s) => s.files.length > 0);
 
     if (steps.length === 0) {
-      // never leave a run planless — fall back to a single scaffold/impl step
-      steps.push({
-        index: 1,
-        title: `Implement: ${workItem.title}`.slice(0, 160),
-        rationale: "Model returned no usable plan; single-step fallback.",
-        files: repo.greenfield ? ["README.md"] : [repo.fileTree[0] ?? "README.md"],
-        kind: repo.greenfield ? "create" : "edit",
-      });
+      // never leave a run planless — synthesise a reasonable fallback
+      const isWeb = /\b(ui|page|app|website|front[- ]?end|html|css|button|form|dashboard)\b/i.test(
+        `${workItem.title} ${workItem.bodyMd ?? ""}`,
+      );
+      if (repo.greenfield && isWeb) {
+        steps.push(
+          { index: 1, title: "Scaffold HTML entry point", rationale: "fallback plan", files: ["index.html"], kind: "create" },
+          { index: 2, title: "Add stylesheet", rationale: "fallback plan", files: ["style.css"], kind: "create" },
+          { index: 3, title: `Implement app logic for: ${workItem.title}`.slice(0, 160), rationale: "fallback plan", files: ["app.js"], kind: "create" },
+        );
+      } else {
+        steps.push({
+          index: 1,
+          title: `Implement: ${workItem.title}`.slice(0, 160),
+          rationale: "Model returned no usable plan; single-step fallback.",
+          files: repo.greenfield ? ["src/main.js"] : [repo.fileTree.find((f) => CODE_EXT.test(f)) ?? repo.fileTree[0] ?? "README.md"],
+          kind: repo.greenfield ? "create" : "edit",
+        });
+      }
     }
 
     return {
@@ -264,16 +295,26 @@ export class CoderAgentService {
       `\nCURRENT FILE CONTENTS:\n${current.join("\n\n")}`,
     ].join("\n");
 
-    const raw = await ask({
-      purpose: "code",
-      routingClass: "code",
-      system,
-      user,
-      json: true,
-      maxOutputTokens: 8000,
-      stepId: `${step.index}`,
-    });
-    const parsed = extractJson<{ files?: { path?: string; content?: string; action?: string }[] }>(raw);
+    const call = (extra = "") =>
+      ask({
+        purpose: "code",
+        routingClass: "code",
+        system,
+        user: user + extra,
+        json: true,
+        maxOutputTokens: 8000,
+        stepId: `${step.index}`,
+      });
+
+    type RawFiles = { files?: { path?: string; content?: string; action?: string }[] };
+    let parsed = extractJson<RawFiles>(await call());
+    if (!parsed?.files?.some((f) => typeof f?.content === "string" && f.content.trim())) {
+      // retry once — the first reply produced no file contents
+      parsed =
+        extractJson<RawFiles>(
+          await call("\n\nYou returned no file contents. Output the full contents of every target file now."),
+        ) ?? parsed;
+    }
 
     const out: GeneratedFile[] = [];
     for (const f of parsed?.files ?? []) {
@@ -289,6 +330,126 @@ export class CoderAgentService {
       if (out.length >= MAX_FILES_PER_STEP) break;
     }
     return out;
+  }
+
+  // ── iterative step loop (read → edit → run → fix) ────────────────────────
+  async runStep(
+    x: StepExec,
+    step: AgentStep,
+    workItem: WorkItemLike,
+    repo: RepoContext,
+  ): Promise<StepResult> {
+    if (step.kind === "delete") {
+      const written: string[] = [];
+      for (const p of step.files) {
+        const r = await x.run(`rm -f ${shq(p)}`);
+        if (r.ok) written.push(p);
+      }
+      return { filesWritten: written, turns: 0, notes: [] };
+    }
+
+    const seed: string[] = [];
+    for (const path of step.files) {
+      const body = await x.read(path).catch(() => null);
+      seed.push(
+        body == null
+          ? `--- ${path} --- (does not exist yet)`
+          : `--- ${path} ---\n${body.length > 5000 ? body.slice(0, 5000) + "\n… (truncated)" : body}`,
+      );
+    }
+
+    const system =
+      "You are a senior engineer implementing ONE step of an approved plan in a real repo, working turn by turn. " +
+      "Reply with a single fenced ```json block holding an object with: a short `thought` string, " +
+      "an `actions` array, and a `done` boolean. Each action is an object with a `op` field of " +
+      '"read" (with `path`), "search" (with `query` and optional `path`), "write" (with `path` and ' +
+      "`content` = the COMPLETE new file contents), or \"run\" (with `command` for a quick check). " +
+      "Set done true once the step's files are written and look correct. Keep it to a few turns. " +
+      "Write working, idiomatic code — no TODO stubs for the core behaviour.";
+
+    const header = [
+      `WORK ITEM: ${workItem.title}`,
+      workItem.acceptanceCriteria?.length
+        ? `ACCEPTANCE CRITERIA:\n${workItem.acceptanceCriteria.map((c) => `- ${c}`).join("\n")}`
+        : "",
+      `STACK: ${repo.stack}${repo.greenfield ? " (greenfield)" : ""}`,
+      `\nSTEP ${step.index}: ${step.title}`,
+      step.rationale ? `WHY: ${step.rationale}` : "",
+      `TARGET FILES: ${step.files.join(", ")}`,
+      `\nCURRENT CONTENTS:\n${seed.join("\n\n")}`,
+    ].join("\n");
+
+    const written = new Set<string>();
+    const notes: string[] = [];
+    const transcript: string[] = [];
+    let turn = 0;
+
+    for (turn = 1; turn <= MAX_TURNS; turn++) {
+      const user = header + (transcript.length ? `\n\n--- HISTORY ---\n${transcript.join("\n\n")}` : "") + `\n\nTurn ${turn}. Respond with the JSON.`;
+      const raw = await x.ask({
+        purpose: "code",
+        routingClass: "code",
+        system,
+        user,
+        maxOutputTokens: 8000,
+        stepId: String(step.index),
+      });
+      const parsed = extractJson<{ thought?: string; actions?: Record<string, string>[]; done?: boolean }>(raw);
+      if (!parsed) {
+        notes.push(`turn ${turn}: unparseable reply`);
+        break;
+      }
+      if (parsed.thought) notes.push(parsed.thought.slice(0, 200));
+
+      const actions = Array.isArray(parsed.actions) ? parsed.actions.slice(0, MAX_ACTIONS) : [];
+      let wroteThisTurn = false;
+      const obs: string[] = [];
+
+      for (const a of actions) {
+        const op = String(a.op ?? "");
+        const path = String(a.path ?? "").replace(/^\.?\//, "").trim();
+        if (op === "read") {
+          const body = await x.read(path).catch(() => null);
+          obs.push(`read ${path}:\n${body == null ? "(missing)" : body.slice(0, 4000)}`);
+        } else if (op === "search") {
+          const res = await x.search(String(a.query ?? ""), path || ".").catch(() => "");
+          obs.push(`search "${a.query}":\n${res.slice(0, 2500) || "(no matches)"}`);
+        } else if (op === "write") {
+          if (!path || path.includes("..") || path.startsWith("/") || typeof a.content !== "string") {
+            obs.push(`write ${path}: rejected (bad path or content)`);
+            continue;
+          }
+          if (a.content.length > MAX_FILE_BYTES) {
+            obs.push(`write ${path}: rejected (>${MAX_FILE_BYTES} bytes)`);
+            continue;
+          }
+          const r = await x.write(path, a.content);
+          obs.push(`write ${path}: ${r.ok ? "ok" : "rejected — " + r.detail}`);
+          if (r.ok) {
+            written.add(path);
+            wroteThisTurn = true;
+          }
+        } else if (op === "run") {
+          const cmd = String(a.command ?? "").trim();
+          if (!RUN_ALLOW.test(cmd)) {
+            obs.push(`run "${cmd}": not allowed in the step loop`);
+            continue;
+          }
+          const r = await x.run(cmd);
+          obs.push(`run "${cmd}" (${r.ok ? "ok" : "non-zero"}):\n${r.output.slice(0, 3000)}`);
+        } else {
+          obs.push(`unknown op "${op}"`);
+        }
+      }
+
+      transcript.push(`TURN ${turn}: ${parsed.thought ?? ""}\n${obs.join("\n")}`);
+      await x.note(`step ${step.index} · turn ${turn}${wroteThisTurn ? " · wrote " + [...written].join(", ") : ""}`);
+
+      if (parsed.done && written.size > 0) break;
+      if (!wroteThisTurn && turn >= 2) break; // stalled
+    }
+
+    return { filesWritten: [...written], turns: turn, notes };
   }
 
   // ── review ────────────────────────────────────────────────────────────────
@@ -348,6 +509,8 @@ export class CoderAgentService {
       .filter((s) => s.files.length > 0);
   }
 }
+
+const shq = (s: string) => `'${String(s).replace(/'/g, `'\\''`)}'`;
 
 /** Pull the first JSON object out of a model reply (handles ```json fences and prose). */
 export function extractJson<T>(text: string): T | null {
