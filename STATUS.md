@@ -20,6 +20,19 @@
 | **HITL / Approvals** (new): plan-approval gate blocks a Run, `reject` with no note → 400, `approve` resumes the run to `succeeded`, `reject` (with note) fails it as `plan_rejected` with the note surfaced as the failure message | ✅ all four paths verified live via the API |
 | Dashboard (`:8080`) served through nginx, proxies `/api/*` including SSE | ✅ 200, login round-trips to core |
 
+## Verified on this machine (2026-08-30) — deep tracking + chart-rich dashboard
+
+| Check | Result |
+|-------|--------|
+| `run.plan` jsonb column (migration `RunPlan1725700000000`) — agent plan persisted per run, editable-flag, per-step outcome written back | ✅ applied; visible on `GET /runs/:id` |
+| `GET /runs/:id/steps` — plan step ↔ its model calls + tool calls (by `<runId>-s<index>`), files written, per-step cost/tokens, `other` bucket | ✅ verified on a 5-step calculator run |
+| `GET /runs?workItemId=` filter | ✅ |
+| `GET /dashboard/{overview,timeseries,activity,workload}` — real SQL aggregations (counts, success + autonomy %, top models/tools, hourly buckets, cross-run activity w/ ticket titles, L1/L2/L3 tiers) | ✅ all 4 return live data |
+| Overview redesigned — 6 sparkline hero tiles, live agent-activity stream, workload donut, recent-runs table w/ step-progress meter, tool/model bar lists | ✅ builds, serves 200 |
+| Run detail "Steps" tab — persisted plan + expandable per-step model/tool/file breakdown | ✅ |
+| coder agent: plan call retries once when the first reply has no usable steps | ✅ 5-step plan incl. package.json + tests |
+| 84/84 core tests · dashboard `tsc` + `next build` clean | ✅ |
+
 ## Verified on this machine (2026-08-29) — real coder agent
 
 | Check | Result |
