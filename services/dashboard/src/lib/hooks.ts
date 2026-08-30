@@ -229,6 +229,17 @@ export function useAuditLog(action?: string) {
   });
 }
 
+export function useToolCatalog() {
+  return useQuery({
+    queryKey: ["tools", "catalog"],
+    queryFn: () =>
+      api.get<
+        { name: string; description: string; execution: string; riskTier: string; idempotent: boolean }[]
+      >("/tools/catalog"),
+    staleTime: 300_000,
+  });
+}
+
 export function useAuditVerify() {
   return useQuery({
     queryKey: ["audit", "verify"],

@@ -24,7 +24,7 @@ import { cn } from "@/lib/utils";
 /* ─────────────────────────────────────────────────────────────────────────────
    This screen is a living map of the ACTUAL implementation. Per the team rule
    it is updated in the same change as any phase / feature / API / schema shift.
-   Last synced: 2026-08-30 — Analytics / Projects / System Health screens, 429 retry-backoff.
+   Last synced: 2026-08-30 — audit log, Agents & Policies screen, review-fix round, multi-stack verify.
    ──────────────────────────────────────────────────────────────────────────── */
 
 type Node = {
@@ -53,7 +53,7 @@ const TIERS: { title: string; nodes: Node[] }[] = [
         detail: {
           what: "Operator console. Talks to Core directly (CORS open) — no reverse proxy, so SSE/WS are never buffered.",
           points: [
-            "Screens: Overview, Runs (+ per-step drill-down), Approvals, Work Items, Analytics, Projects, Integrations, AI Providers, System Health, Architecture",
+            "Screens: Overview, Runs (+ per-step drill-down), Approvals, Work Items, Agents & Policies, Analytics, Projects, Integrations, AI Providers, Audit Log, System Health, Architecture — nothing left on the roadmap list",
             "TanStack Query for REST, native EventSource for run/fleet streams, native WebSocket for control",
             "Tailwind v4 tokens, dark-first, light/system themes, hand-rolled SVG charts, @praxis/event-schemas as the shared event catalog",
           ],

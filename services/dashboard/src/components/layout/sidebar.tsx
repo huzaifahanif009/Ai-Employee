@@ -3,6 +3,7 @@
 import {
   Activity,
   BarChart3,
+  Bot,
   Boxes,
   BrainCircuit,
   CheckSquare,
@@ -26,6 +27,7 @@ const MAIN: NavItem[] = [
   { href: "/runs", label: "Runs", icon: Activity },
   { href: "/approvals", label: "Approvals", icon: CheckSquare },
   { href: "/work-items", label: "Work Items", icon: ListTodo },
+  { href: "/agents", label: "Agents & Policies", icon: Bot },
   { href: "/analytics", label: "Analytics", icon: BarChart3 },
 ];
 
@@ -38,7 +40,7 @@ const SYSTEM: NavItem[] = [
   { href: "/architecture", label: "Architecture", icon: Network },
 ];
 
-const SOON = ["Agents & Policies"];
+const SOON: string[] = [];
 
 function NavLink({ item, pathname, badge }: { item: NavItem; pathname: string; badge?: number }) {
   const { href, label, icon: Icon } = item;
@@ -108,18 +110,22 @@ export function Sidebar({ openApprovals }: { openApprovals: number }) {
           <NavLink key={item.href} item={item} pathname={pathname} />
         ))}
 
-        <div className="px-2.5 pb-1 pt-4 text-[10px] font-semibold uppercase tracking-wider text-muted-2">
-          Roadmap
-        </div>
-        {SOON.map((label) => (
-          <div
-            key={label}
-            className="flex items-center gap-2.5 rounded-[10px] px-2.5 py-1.5 text-sm text-muted-2/60"
-          >
-            <Boxes className="h-3.5 w-3.5" />
-            {label}
-          </div>
-        ))}
+        {SOON.length > 0 && (
+          <>
+            <div className="px-2.5 pb-1 pt-4 text-[10px] font-semibold uppercase tracking-wider text-muted-2">
+              Roadmap
+            </div>
+            {SOON.map((label) => (
+              <div
+                key={label}
+                className="flex items-center gap-2.5 rounded-[10px] px-2.5 py-1.5 text-sm text-muted-2/60"
+              >
+                <Boxes className="h-3.5 w-3.5" />
+                {label}
+              </div>
+            ))}
+          </>
+        )}
       </nav>
 
       <div className="border-t border-line px-4 py-3 text-[11px] text-muted-2">
