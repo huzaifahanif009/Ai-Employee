@@ -186,6 +186,33 @@ describe('CoderAgentService.analyzeRepo', () => {
     expect(ctx.testCommand).toBe('npm test --silent');
   });
 
+  it.each([
+    ['go.mod\nmain.go', 'go', 'go test ./...'],
+    ['Cargo.toml\nsrc/lib.rs', 'rust', 'cargo test --quiet'],
+    ['pom.xml\nsrc/Main.java', 'java-maven', 'mvn -q -B test'],
+    ['manage.py\napp/models.py', 'python', 'python manage.py test'],
+  ])('detects %s → %s', async (files, stack, cmd) => {
+    const io: RepoIo = {
+      listFiles: async () => files,
+      readFile: async () => "x",
+      sh: async () => ({ ok: true, output: "" }),
+    };
+    const ctx = await svc.analyzeRepo(io);
+    expect(ctx.stack).toBe(stack);
+    expect(ctx.testCommand).toBe(cmd);
+  });
+
+  it('uses a Makefile test target when present', async () => {
+    const io: RepoIo = {
+      listFiles: async () => "Makefile\nmain.c",
+      readFile: async (p) => (p === "Makefile" ? "test:\n\t./run-tests.sh\n" : "x"),
+      sh: async () => ({ ok: true, output: "" }),
+    };
+    const ctx = await svc.analyzeRepo(io);
+    expect(ctx.stack).toBe("make");
+    expect(ctx.testCommand).toBe("make test");
+  });
+
   it('flags greenfield when only markdown is present', async () => {
     const io: RepoIo = {
       listFiles: async () => 'README.md\nPRAXIS_NOTES.md',

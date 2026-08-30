@@ -367,15 +367,15 @@ const LIFECYCLE: Stage[] = [
     key: "verify",
     title: "Verify",
     by: "Coder Agent · Tool Broker (test.run)",
-    does: "If a test command was detected, install deps and run it. On failure: one repair round (feed the output back → rewrite → re-test), then continue (the PR is labelled needs-attention).",
+    does: "Detects the stack (node / python / go / rust / java / ruby / make), installs deps, runs the test command. On failure: one repair round (feed the output back → rewrite → re-test), then continue (PR labelled needs-attention).",
     events: ["run.state_changed → verifying", "verify.started", "verify.check_finished", "verify.finished"],
   },
   {
     key: "review",
     title: "Review",
     by: "Coder Agent · Model Router (reviewer)",
-    does: "A reviewer model call assesses the real staged diff against the acceptance criteria → verdict + findings. An empty diff fails the run.",
-    events: ["run.state_changed → reviewing", "review.started", "review.finished"],
+    does: "A reviewer model call assesses the real staged diff against the acceptance criteria → verdict + findings (skipped for a trivial diff). A `fail` verdict triggers one fix round → re-review. An empty diff fails the run.",
+    events: ["run.state_changed → reviewing", "review.started", "review.finished", "progress.warning (review_fix_round)"],
   },
   {
     key: "deliver-gate",

@@ -29,9 +29,21 @@ export interface AgentPlan {
   steps: AgentStep[];
 }
 
+export type RepoStack =
+  | "node"
+  | "python"
+  | "go"
+  | "rust"
+  | "java-maven"
+  | "java-gradle"
+  | "ruby"
+  | "make"
+  | "static-web"
+  | "unknown";
+
 export interface RepoContext {
   greenfield: boolean;
-  stack: "node" | "python" | "static-web" | "unknown";
+  stack: RepoStack;
   fileTree: string[];
   digest: string;
   testCommand: string | null;
@@ -105,9 +117,15 @@ export class CoderAgentService {
     const codeFiles = fileTree.filter((f) => CODE_EXT.test(f) && !/^(PRAXIS_NOTES\.md)$/i.test(f));
     const greenfield = codeFiles.length === 0;
 
-    let stack: RepoContext["stack"] = "unknown";
+    let stack: RepoStack = "unknown";
     if (has(/(^|\/)package\.json$/)) stack = "node";
-    else if (has(/(^|\/)(requirements\.txt|pyproject\.toml|setup\.py)$/)) stack = "python";
+    else if (has(/(^|\/)go\.mod$/)) stack = "go";
+    else if (has(/(^|\/)Cargo\.toml$/)) stack = "rust";
+    else if (has(/(^|\/)pom\.xml$/)) stack = "java-maven";
+    else if (has(/(^|\/)build\.gradle(\.kts)?$/)) stack = "java-gradle";
+    else if (has(/(^|\/)(requirements\.txt|pyproject\.toml|setup\.py|manage\.py)$/)) stack = "python";
+    else if (has(/(^|\/)Gemfile$/)) stack = "ruby";
+    else if (has(/(^|\/)Makefile$/)) stack = "make";
     else if (has(/(^|\/)index\.html$/)) stack = "static-web";
 
     // read a handful of orienting files
@@ -116,6 +134,12 @@ export class CoderAgentService {
       "README.md",
       "pyproject.toml",
       "requirements.txt",
+      "go.mod",
+      "Cargo.toml",
+      "pom.xml",
+      "build.gradle",
+      "Gemfile",
+      "Makefile",
       "index.html",
       "tsconfig.json",
     ];
@@ -146,15 +170,30 @@ export class CoderAgentService {
       }
     }
     const scripts = (pkg?.scripts as Record<string, string> | undefined) ?? {};
-    const testCommand =
-      stack === "node"
-        ? scripts.test && !/no test specified/i.test(scripts.test)
-          ? "npm test --silent"
-          : null
-        : stack === "python"
-          ? "pytest -q"
-          : null;
-    const buildCommand = stack === "node" && scripts.build ? "npm run build" : null;
+    const makefile = has(/(^|\/)Makefile$/) ? (await io.readFile("Makefile").catch(() => null)) ?? "" : "";
+    const makeHasTest = /^test\s*:/m.test(makefile);
+
+    const TEST_CMD: Record<RepoStack, string | null> = {
+      node: scripts.test && !/no test specified/i.test(scripts.test) ? "npm test --silent" : null,
+      python: has(/(^|\/)manage\.py$/) ? "python manage.py test" : "pytest -q",
+      go: "go test ./...",
+      rust: "cargo test --quiet",
+      "java-maven": "mvn -q -B test",
+      "java-gradle": "./gradlew test --console=plain -q",
+      ruby: has(/(^|\/)(spec\/|\.rspec$)/) ? "bundle exec rspec" : "bundle exec rake test",
+      make: makeHasTest ? "make test" : null,
+      "static-web": null,
+      unknown: null,
+    };
+    const testCommand = TEST_CMD[stack] ?? (makeHasTest ? "make test" : null);
+    const buildCommand =
+      stack === "node" && scripts.build
+        ? "npm run build"
+        : stack === "go"
+          ? "go build ./..."
+          : stack === "rust"
+            ? "cargo build --quiet"
+            : null;
 
     const digest = [
       `Stack: ${stack}${greenfield ? " (greenfield — repo has no source files yet)" : ""}`,

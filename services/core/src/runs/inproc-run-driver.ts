@@ -398,7 +398,11 @@ export class InprocRunDriver {
         const install =
           repoCtx.stack === 'node'
             ? 'if [ -f package.json ] && [ ! -d node_modules ]; then npm install --no-audit --no-fund --silent || true; fi'
-            : 'true';
+            : repoCtx.stack === 'python'
+              ? 'if [ -f requirements.txt ]; then pip install -q -r requirements.txt || true; fi'
+              : repoCtx.stack === 'ruby'
+                ? 'if [ -f Gemfile ]; then bundle install --quiet || true; fi'
+                : 'true';
         await tool('shell.exec', { command: install });
         let t = await tool('test.run', { command: `${repoCtx.testCommand} 2>&1` });
         const noTests = /no tests? (found|specified)|Missing script|0 passing/i.test(t.outputPreview);
@@ -431,10 +435,39 @@ export class InprocRunDriver {
       // ── review ─────────────────────────────────────────────────────────
       await step('reviewing');
       await emit('review.started', { runId });
-      const diffRes = await tool('git.diff', { staged: true });
-      const diff = diffRes.outputPreview;
-      const review = await this.coder.review(ask, wi, diff);
+      let diff = (await tool('git.diff', { staged: true })).outputPreview;
+      let review = await this.coder.review(ask, wi, diff);
       await emit('review.finished', { runId, verdict: review.verdict, summary: review.summary, findings: review.findings });
+
+      // one fix round if the reviewer flagged something material
+      if (review.verdict === 'fail' && diff.trim()) {
+        await emit('progress.warning', { runId, kind: 'review_fix_round', evidence: tail(review.summary || 'reviewer failed the diff') });
+        const fixStep: AgentStep = {
+          index: steps.length + 2,
+          title: 'Address review findings',
+          rationale:
+            `Reviewer verdict: fail. ${review.summary}\n` +
+            review.findings.map((f) => `- [${f.severity}] ${f.message}`).join('\n'),
+          files: [...changed],
+          kind: 'edit',
+        };
+        const fixes = await this.coder.implementStep(ask, io, fixStep, wi, repoCtx);
+        let fixed = 0;
+        for (const f of fixes) {
+          const r = await tool('fs.write', { path: f.path, content: f.content }, sid(fixStep.index));
+          if (r.status === 'ok') { changed.add(f.path); fixed++; }
+        }
+        if (fixed) {
+          await tool('git.add', {}, sid(fixStep.index));
+          if (repoCtx.testCommand) {
+            const t = await tool('test.run', { command: `${repoCtx.testCommand} 2>&1` });
+            verifyOk = t.status === 'ok' || /no tests? (found|specified)|Missing script/i.test(t.outputPreview);
+          }
+          diff = (await tool('git.diff', { staged: true })).outputPreview;
+          review = await this.coder.review(ask, wi, diff);
+          await emit('review.finished', { runId, verdict: review.verdict, summary: review.summary, findings: review.findings, round: 2 });
+        }
+      }
 
       // ── delivery approval gate ─────────────────────────────────────────
       if (this.cfg.requireDeliveryApproval) {
