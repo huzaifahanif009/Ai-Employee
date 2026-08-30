@@ -6,6 +6,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { ApprovalCard } from "@/components/approvals/approval-card";
 import { ActivityFeed } from "@/components/runs/activity-feed";
+import { RunSteps } from "@/components/runs/run-steps";
 import { RunStateChip } from "@/components/state-chip";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -149,8 +150,9 @@ export default function RunDetailPage() {
 
       <Card>
         <CardContent className="pt-4">
-          <Tabs defaultValue="activity">
+          <Tabs defaultValue="steps">
             <TabsList>
+              <TabsTrigger value="steps">Steps{run.plan ? ` (${run.plan.steps.length})` : ""}</TabsTrigger>
               <TabsTrigger value="activity">Activity</TabsTrigger>
               <TabsTrigger value="plan">Plan{plan ? ` (${plan.stepCount})` : ""}</TabsTrigger>
               <TabsTrigger value="changes">Changes{writes.length ? ` (${writes.length})` : ""}</TabsTrigger>
@@ -160,6 +162,10 @@ export default function RunDetailPage() {
               <TabsTrigger value="delivery">Delivery</TabsTrigger>
               <TabsTrigger value="cost">Cost{modelCalls?.length ? ` (${modelCalls.length})` : ""}</TabsTrigger>
             </TabsList>
+
+            <TabsContent value="steps">
+              <RunSteps runId={id} live={!terminal} />
+            </TabsContent>
 
             <TabsContent value="activity">
               <ActivityFeed events={events} />

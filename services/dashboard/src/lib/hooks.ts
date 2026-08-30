@@ -9,11 +9,16 @@ import type {
   Approval,
   ApprovalDecision,
   Connector,
+  DashActivity,
+  DashBucket,
+  DashOverview,
+  DashWorkload,
   ModelCall,
   Page,
   Project,
   RepoRef,
   Run,
+  RunStepsResponse,
   ToolCall,
   WorkItem,
 } from "./types";
@@ -146,6 +151,49 @@ export function useRun(id: string | null) {
     queryFn: () => api.get<Run>(`/runs/${id}`),
     enabled: !!id,
     refetchInterval: 4000,
+  });
+}
+
+export function useRunSteps(runId: string | null, live: boolean) {
+  return useQuery({
+    queryKey: ["runs", runId ?? "", "steps"],
+    queryFn: () => api.get<RunStepsResponse>(`/runs/${runId}/steps`),
+    enabled: !!runId,
+    refetchInterval: live ? 4000 : false,
+  });
+}
+
+// ---------- dashboard aggregates ----------
+
+export function useDashOverview() {
+  return useQuery({
+    queryKey: ["dashboard", "overview"],
+    queryFn: () => api.get<DashOverview>("/dashboard/overview"),
+    refetchInterval: 10000,
+  });
+}
+
+export function useDashTimeseries(hours = 24) {
+  return useQuery({
+    queryKey: ["dashboard", "timeseries", hours],
+    queryFn: () => api.get<{ hours: number; buckets: DashBucket[] }>(`/dashboard/timeseries?hours=${hours}`),
+    refetchInterval: 30000,
+  });
+}
+
+export function useDashActivity(limit = 40) {
+  return useQuery({
+    queryKey: ["dashboard", "activity", limit],
+    queryFn: () => api.get<DashActivity[]>(`/dashboard/activity?limit=${limit}`),
+    refetchInterval: 6000,
+  });
+}
+
+export function useDashWorkload() {
+  return useQuery({
+    queryKey: ["dashboard", "workload"],
+    queryFn: () => api.get<DashWorkload>("/dashboard/workload"),
+    refetchInterval: 15000,
   });
 }
 

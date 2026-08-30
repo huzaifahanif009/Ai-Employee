@@ -64,6 +64,27 @@ export interface RunTotals {
   wallMs: number;
 }
 
+export interface RunPlanStep {
+  index: number;
+  title: string;
+  rationale?: string;
+  files: string[];
+  kind: "create" | "edit" | "delete";
+  state?: "pending" | "succeeded" | "no_changes" | "failed";
+  filesWritten?: string[];
+}
+
+export interface RunPlan {
+  summary: string;
+  risk: "low" | "medium" | "high";
+  greenfield: boolean;
+  steps: RunPlanStep[];
+  edited: boolean;
+  editedBy?: string | null;
+  source: "agent" | "human";
+  createdAt: string;
+}
+
 export interface Run {
   id: string;
   tenantId: string;
@@ -77,10 +98,91 @@ export interface Run {
   headSha: string | null;
   prRef: { number: number; url: string; state: string } | null;
   totals: RunTotals;
+  plan: RunPlan | null;
   startedAt: string | null;
   endedAt: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface RunStepDetail {
+  index: number;
+  title: string;
+  rationale: string;
+  files: string[];
+  kind: "create" | "edit" | "delete";
+  state: "pending" | "succeeded" | "no_changes" | "failed";
+  filesWritten: string[];
+  costUsd: number;
+  tokens: number;
+  modelCalls: {
+    purpose: string;
+    provider: string;
+    model: string;
+    agentRole: string | null;
+    inputTokens: number;
+    outputTokens: number;
+    costUsd: number;
+    latencyMs: number;
+    cacheHit: string;
+    finishReason: string | null;
+    createdAt: string;
+  }[];
+  toolCalls: {
+    seq: number;
+    toolName: string;
+    riskTier: string;
+    status: string;
+    input: Record<string, unknown>;
+    outputPreview: string;
+    durationMs: number;
+    error: string | null;
+    createdAt: string;
+  }[];
+}
+
+export interface RunStepsResponse {
+  runId: string;
+  plan: RunPlan | null;
+  steps: RunStepDetail[];
+  other: { modelCalls: RunStepDetail["modelCalls"]; toolCalls: RunStepDetail["toolCalls"] };
+}
+
+export interface DashOverview {
+  runs: { total: number; active: number; last24h: number; succeeded7d: number; failed7d: number };
+  successRate: number | null;
+  autonomyPct: number;
+  approvals: { open: number; awaitingPlan: number; decided24h: number };
+  spend: { last24hUsd: number; allTimeUsd: number; tokens24h: number; tokensAll: number };
+  activity: { modelCalls24h: number; toolCalls24h: number; filesChanged24h: number };
+  avgRunSeconds: number;
+  byState: { state: string; count: number }[];
+  topModels: { model: string; calls: number; costUsd: number; tokens: number }[];
+  topTools: { tool: string; calls: number; ok: number }[];
+}
+
+export interface DashBucket {
+  t: string;
+  started: number;
+  succeeded: number;
+  failed: number;
+  spendUsd: number;
+  tokens: number;
+}
+
+export interface DashActivity {
+  seq: number;
+  ts: string;
+  type: string;
+  runId: string;
+  workItem: string;
+  summary: string;
+}
+
+export interface DashWorkload {
+  completed: number;
+  tiers: { key: string; label: string; count: number }[];
+  byOutcome: { state: string; count: number }[];
 }
 
 export interface Page<T> {

@@ -24,7 +24,7 @@ import { cn } from "@/lib/utils";
 /* ─────────────────────────────────────────────────────────────────────────────
    This screen is a living map of the ACTUAL implementation. Per the team rule
    it is updated in the same change as any phase / feature / API / schema shift.
-   Last synced: 2026-08-29 — real coder agent (CoderAgentService) + editable plan gate.
+   Last synced: 2026-08-30 — persisted run plans, per-step drill-down, dashboard aggregation API.
    ──────────────────────────────────────────────────────────────────────────── */
 
 type Node = {
@@ -208,11 +208,12 @@ const TIERS: { title: string; nodes: Node[] }[] = [
         icon: Layers,
         tone: "accent",
         detail: {
-          what: "run_event is the source of truth; a transactional outbox publishes to the EventBus.",
+          what: "run_event is the source of truth; a transactional outbox publishes to the EventBus. The run's plan is also persisted on the run row (run.plan) and each step's outcome written back as it executes.",
           points: [
             `${EVENT_TYPES.length}-type event catalog; ${RUN_STATES.length} run states with a validated transition table`,
             "EventBus driver: memory | redis-streams (redis-streams in the running stack)",
             "SSE delivery with Last-Event-ID backfill from run_event by seq",
+            "GET /runs/:id/steps joins model_call + tool_call ledgers to the plan step by <runId>-s<index>",
           ],
         },
       },
@@ -401,7 +402,8 @@ const LIFECYCLE: Stage[] = [
 
 const API_SURFACE: { group: string; routes: string[] }[] = [
   { group: "Auth", routes: ["POST /auth/login", "POST /auth/refresh", "GET /auth/me"] },
-  { group: "Runs", routes: ["GET /runs", "GET /runs/:id", "POST /runs", "POST /runs/:id/{pause,resume,cancel,comment}", "GET /runs/:id/{events,model-calls,tool-calls}"] },
+  { group: "Runs", routes: ["GET /runs  (?workItemId= filter)", "GET /runs/:id  (incl. run.plan)", "POST /runs", "POST /runs/:id/{pause,resume,cancel,comment}", "GET /runs/:id/{steps,events,model-calls,tool-calls}"] },
+  { group: "Dashboard", routes: ["GET /dashboard/overview", "GET /dashboard/timeseries?hours=", "GET /dashboard/activity?limit=", "GET /dashboard/workload"] },
   { group: "Approvals", routes: ["GET /approvals", "POST /approvals/:id/decision  { decision, note?, payload? }", "payload.editedPlan → run follows the human-edited plan"] },
   { group: "Work items / Intake", routes: ["GET/POST /work-items", "POST /projects/:id/intake/sync", "POST /webhooks/in/:connectorId (signed, public)"] },
   { group: "Connectors", routes: ["GET/POST/PATCH/DELETE /connectors", "POST /connectors/:id/{test,webhook-secret}", "GET /connectors/:id/repos"] },
